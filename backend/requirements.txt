@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+langchain==0.3.14
+langgraph==0.2.60
+litellm==1.55.10
+langfuse==2.57.1
+pydantic==2.10.4
+pydantic-settings==2.7.1
+redis==5.2.1
+asyncpg==0.30.0
+httpx==0.28.1
