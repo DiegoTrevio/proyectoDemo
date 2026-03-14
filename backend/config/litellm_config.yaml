@@ -1,23 +1,83 @@
 model_list:
-  - model_name: claude-sonnet
+  # ═══════════════════════════════════════════════════════════════════
+  # TIER 1 - Cerebro (Orchestrator)
+  # ═══════════════════════════════════════════════════════════════════
+  - model_name: agentOS/orchestrator
     litellm_params:
-      model: anthropic/claude-sonnet-4-20250514
+      model: anthropic/claude-opus-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  - model_name: claude-haiku
+  # ═══════════════════════════════════════════════════════════════════
+  # TIER 2 - Workhorse (default para todos los agentes)
+  # ═══════════════════════════════════════════════════════════════════
+  - model_name: agentOS/workhorse
     litellm_params:
-      model: anthropic/claude-haiku-4-5-20251001
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  - model_name: gpt-4o
+  - model_name: agentOS/workhorse-gemini
     litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
-
-  - model_name: gemini-flash
-    litellm_params:
-      model: gemini/gemini-2.0-flash
+      model: gemini/gemini-3-flash
       api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: agentOS/workhorse-qwen
+    litellm_params:
+      model: openai/qwen3.5-plus
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/QWEN_API_KEY
+
+  - model_name: agentOS/workhorse-kimi
+    litellm_params:
+      model: openai/kimi-k2.5
+      api_base: https://api.moonshot.ai/v1
+      api_key: os.environ/KIMI_API_KEY
+
+  # ═══════════════════════════════════════════════════════════════════
+  # TIER 3 - Barato (volumen alto)
+  # ═══════════════════════════════════════════════════════════════════
+  - model_name: agentOS/cheap
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: agentOS/cheap-qwen
+    litellm_params:
+      model: openai/qwen3-8b
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/QWEN_API_KEY
+
+  # ═══════════════════════════════════════════════════════════════════
+  # TIER 4 - Especialistas
+  # ═══════════════════════════════════════════════════════════════════
+  - model_name: agentOS/facts
+    litellm_params:
+      model: perplexity/sonar-pro
+      api_key: os.environ/PERPLEXITY_API_KEY
+
+  - model_name: agentOS/on-premise
+    litellm_params:
+      model: ollama/llama4
+      api_base: http://localhost:11434
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Imágenes
+  # ═══════════════════════════════════════════════════════════════════
+  - model_name: agentOS/images
+    litellm_params:
+      model: gemini/gemini-3.1-flash-image-preview
+      api_key: os.environ/GOOGLE_API_KEY
+
+# ═══════════════════════════════════════════════════════════════════════
+# Routing con fallbacks
+# ═══════════════════════════════════════════════════════════════════════
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 3
+  timeout: 120
+  fallbacks:
+    - agentOS/workhorse: [agentOS/workhorse-gemini, agentOS/workhorse-qwen, agentOS/workhorse-kimi]
+    - agentOS/orchestrator: [agentOS/workhorse-kimi, agentOS/workhorse-gemini]
+    - agentOS/cheap: [agentOS/cheap-qwen]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
