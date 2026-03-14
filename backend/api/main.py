@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import agents, billing, stream, tasks
+from api.routes import agents, billing, memory, stream, tasks
 from api.websocket import router as ws_router
 from config.langfuse_client import init_langfuse
 from config.settings import settings
@@ -89,6 +89,7 @@ app.include_router(tasks.router)
 app.include_router(stream.router)
 app.include_router(agents.router)
 app.include_router(billing.router)
+app.include_router(memory.router)
 app.include_router(ws_router)
 
 

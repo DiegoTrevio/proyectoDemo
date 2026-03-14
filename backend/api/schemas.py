@@ -78,6 +78,24 @@ class UsageResponse(BaseModel):
     breakdown: list[dict]
 
 
+# ─── Memory ───────────────────────────────────────────────────────────────
+
+class MemoryStoreRequest(BaseModel):
+    namespace: str = Field(..., min_length=1, max_length=128)
+    key: str = Field(..., min_length=1, max_length=256)
+    value: str
+    metadata: dict | None = None
+
+
+class MemoryEntry(BaseModel):
+    id: str
+    namespace: str
+    key: str
+    value: str
+    metadata: dict
+    created_at: str
+
+
 # ─── Generic ──────────────────────────────────────────────────────────────
 
 class ErrorResponse(BaseModel):

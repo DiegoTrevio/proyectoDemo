@@ -176,3 +176,58 @@ async def test_stream_endpoint_returns_event_stream(client: AsyncClient):
     """Verify the SSE endpoint returns the correct content-type."""
     resp = await client.get("/api/v1/tasks/test-id/stream", headers={"Accept": "text/event-stream"})
     assert resp.headers["content-type"].startswith("text/event-stream")
+
+
+# ─── Memory (integration — requires Redis) ────────────────────────────────
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_memory_store_and_retrieve(client: AsyncClient):
+    resp = await client.post("/api/v1/memory", json={
+        "namespace": "test-ns",
+        "key": "greeting",
+        "value": "hello world",
+        "metadata": {"source": "test"},
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["namespace"] == "test-ns"
+    assert data["key"] == "greeting"
+
+    resp = await client.get("/api/v1/memory/test-ns/greeting")
+    assert resp.status_code == 200
+    assert resp.json()["value"] == "hello world"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_memory_list(client: AsyncClient):
+    await client.post("/api/v1/memory", json={
+        "namespace": "list-ns", "key": "k1", "value": "v1",
+    })
+    await client.post("/api/v1/memory", json={
+        "namespace": "list-ns", "key": "k2", "value": "v2",
+    })
+    resp = await client.get("/api/v1/memory/list-ns")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_memory_delete(client: AsyncClient):
+    await client.post("/api/v1/memory", json={
+        "namespace": "del-ns", "key": "temp", "value": "gone",
+    })
+    resp = await client.delete("/api/v1/memory/del-ns/temp")
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/v1/memory/del-ns/temp")
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_memory_not_found(client: AsyncClient):
+    resp = await client.get("/api/v1/memory/nope/nope")
+    assert resp.status_code == 404

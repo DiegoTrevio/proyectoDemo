@@ -1,14 +1,17 @@
 """Task management endpoints."""
 
+import json
 import uuid
 from datetime import datetime, timezone
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas import ErrorResponse, TaskCreate, TaskListResponse, TaskResponse
 from config.model_router import select_model
+from config.settings import settings
 from db.database import get_db
 from db.models import Task
 
@@ -70,6 +73,17 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
     db.add(task)
     await db.commit()
     await db.refresh(task)
+
+    # Cache in Redis for fast lookup and agent consumption
+    r = aioredis.from_url(settings.redis_url)
+    await r.set(
+        f"task:{task.id}",
+        json.dumps({"task_id": task.id, "goal": task.goal, "status": task.status, "model": task.model}),
+        ex=86400,
+    )
+    await r.lpush("task_queue", task.id)
+    await r.close()
+
     return _task_to_response(task)
 
 
