@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     google_api_key: str = ""
     kimi_api_key: str = ""
+    qwen_api_key: str = ""
     litellm_master_key: str = ""
 
     # Search & Web
