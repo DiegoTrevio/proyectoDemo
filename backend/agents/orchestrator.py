@@ -193,6 +193,11 @@ async def plan_node(state: AgentState) -> dict:
     await _publish(task_id, "thought", "Generating execution plan...")
 
     context_section = ""
+    # Inject memory context
+    mem_ctx = state.get("memory_context", {})
+    combined_memory = mem_ctx.get("combined", "") if isinstance(mem_ctx, dict) else ""
+    if combined_memory:
+        context_section += f"\nRelevant memory/context:\n{combined_memory}\n"
     if state["errors"]:
         context_section += f"\nPrevious errors (do NOT repeat these approaches):\n"
         for err in state["errors"]:
@@ -485,6 +490,22 @@ async def run_task(task_id: str, goal: str, config: dict | None = None) -> str:
         if "timeout" in config:
             cb_config.timeout_seconds = config["timeout"]
 
+    # ── Gather memory context before execution ──
+    memory_context = {}
+    try:
+        from memory.manager import gather_context
+        memory_context = await gather_context(
+            goal=goal,
+            user_id=config.get("user_id", "default") if config else "default",
+            task_id=task_id,
+        )
+        if memory_context.get("combined"):
+            await _publish(task_id, "thought",
+                           f"Retrieved context from memory ({len(memory_context.get('mem0_memories', []))} memories, "
+                           f"{len(memory_context.get('graphiti_facts', []))} facts)")
+    except Exception as e:
+        logger.warning("Memory context retrieval failed: %s", e)
+
     initial_state: AgentState = {
         "task_id": task_id,
         "goal": goal,
@@ -494,7 +515,7 @@ async def run_task(task_id: str, goal: str, config: dict | None = None) -> str:
         "current_step": 0,
         "results": [],
         "errors": [],
-        "memory_context": {},
+        "memory_context": memory_context,
         "iteration": 0,
         "max_iterations": cb_config.max_iterations,
         "final_output": "",
@@ -506,7 +527,21 @@ async def run_task(task_id: str, goal: str, config: dict | None = None) -> str:
 
     try:
         final_state = await orchestrator.ainvoke(initial_state)
-        return final_state.get("final_output", "No output produced")
+        final_output = final_state.get("final_output", "No output produced")
+
+        # ── Save learnings to memory after execution ──
+        try:
+            from memory.manager import save_learnings
+            await save_learnings(
+                goal=goal,
+                result=final_output,
+                task_id=task_id,
+                user_id=config.get("user_id", "default") if config else "default",
+            )
+        except Exception as e:
+            logger.warning("Memory save failed: %s", e)
+
+        return final_output
     except Exception as e:
         logger.exception("Orchestrator failed for task %s", task_id)
         await _publish(task_id, "error", f"Orchestrator fatal error: {e}")
