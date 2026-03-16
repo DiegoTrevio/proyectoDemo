@@ -47,6 +47,10 @@ class Settings(BaseSettings):
 
     # Payments
     stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+
+    # Security
+    manifest_signing_key: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
