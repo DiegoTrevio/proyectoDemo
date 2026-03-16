@@ -28,7 +28,6 @@ class _StubAgent:
 def _build_registry() -> dict:
     """Build agent registry with real implementations where available."""
     registry: dict = {
-        "coder": _StubAgent("coder"),
         "browser": _StubAgent("browser"),
         "document_writer": _StubAgent("document_writer"),
         "validator": _StubAgent("validator"),
@@ -41,6 +40,14 @@ def _build_registry() -> dict:
     except Exception as e:
         logger.warning("Failed to load ResearcherAgent, using stub: %s", e)
         registry["researcher"] = _StubAgent("researcher")
+
+    # Register real Coder agent
+    try:
+        from agents.coder import CoderAgent
+        registry["coder"] = CoderAgent()
+    except Exception as e:
+        logger.warning("Failed to load CoderAgent, using stub: %s", e)
+        registry["coder"] = _StubAgent("coder")
 
     return registry
 
