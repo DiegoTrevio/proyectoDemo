@@ -50,6 +50,17 @@ class Agent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class SecurityPolicy(Base):
+    __tablename__ = "security_policies"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    client_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    policy_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class Usage(Base):
     __tablename__ = "usage"
 

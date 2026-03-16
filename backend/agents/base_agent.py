@@ -70,6 +70,25 @@ class AbstractAgent(ABC):
             selection = select_model(self.task_type, self.default_complexity)
             model = selection.model
 
+        # ── Security: scan input ──
+        task_id = cb_state.__dict__.get("task_id", "unknown")
+        user_text = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        if user_text:
+            from security.middleware import check_input_security, check_output_security
+            sec_check = await check_input_security(
+                user_text, task_id=task_id, action="llm_call",
+            )
+            if not sec_check.allowed:
+                logger.warning("Security blocked input: %s", sec_check.details)
+                return f"[Security blocked: {'; '.join(sec_check.details)}]", cb_state
+            # Replace user message with sanitized version if PII was redacted
+            if sec_check.sanitized_input != user_text:
+                messages = [
+                    {**m, "content": sec_check.sanitized_input}
+                    if m is messages[-1] and m["role"] == "user" else m
+                    for m in messages
+                ]
+
         start = time.monotonic()
         resp = await self._http.post(
             "/chat/completions",
@@ -88,6 +107,13 @@ class AbstractAgent(ABC):
 
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
+
+        # ── Security: scan output ──
+        from security.middleware import check_output_security
+        output_check = check_output_security(content, prompt=user_text, task_id=task_id)
+        if output_check.sanitized_output != content:
+            logger.info("Security sanitized output: %s", output_check.details)
+            content = output_check.sanitized_output
         usage = data.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)

@@ -1,0 +1,135 @@
+# ─── Prompt Injection Detection ─────────────────────────────────────────
+
+define flow check prompt injection
+  """Detect and block prompt injection attempts."""
+
+  # Common injection patterns
+  $injection_patterns = [
+    "ignore previous instructions",
+    "ignore all instructions",
+    "ignore your instructions",
+    "disregard previous",
+    "disregard all previous",
+    "forget your instructions",
+    "forget previous",
+    "you are now",
+    "act as if",
+    "pretend you are",
+    "new instructions:",
+    "override instructions",
+    "system prompt:",
+    "reveal your prompt",
+    "show me your system",
+    "what are your instructions",
+    "repeat your system prompt",
+    "output your initial prompt",
+    "DAN mode",
+    "jailbreak",
+    "developer mode"
+  ]
+
+  if any($injection_patterns in $user_message.lower())
+    bot refuse injection attempt
+    stop
+
+define bot refuse injection attempt
+  "I'm sorry, but I cannot comply with that request. I'm designed to operate within my established guidelines to ensure safe and helpful interactions. How can I assist you with a legitimate task?"
+
+# ─── PII Detection in Input ─────────────────────────────────────────────
+
+define flow check pii in input
+  """Detect PII in user input and warn before processing."""
+
+  # Social Security Numbers
+  if regex("\\b\\d{3}-\\d{2}-\\d{4}\\b", $user_message)
+    bot warn about pii in input
+    $user_message = mask_pii($user_message)
+
+  # Credit card numbers
+  if regex("\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b", $user_message)
+    bot warn about pii in input
+    $user_message = mask_pii($user_message)
+
+  # Email addresses
+  if regex("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", $user_message)
+    bot warn about pii in input
+    $user_message = mask_pii($user_message)
+
+define bot warn about pii in input
+  "I've detected personally identifiable information (PII) in your message. For your security, I'll sanitize the sensitive data before processing your request."
+
+# ─── PII Detection in Output ────────────────────────────────────────────
+
+define flow check pii in output
+  """Ensure PII is not leaked in bot responses."""
+
+  if regex("\\b\\d{3}-\\d{2}-\\d{4}\\b", $bot_message)
+    $bot_message = mask_pii($bot_message)
+
+  if regex("\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b", $bot_message)
+    $bot_message = mask_pii($bot_message)
+
+# ─── Topic Drift Detection ──────────────────────────────────────────────
+
+define flow check topic drift
+  """Prevent off-topic conversations in enterprise context."""
+
+  $off_topic_patterns = [
+    "tell me a joke",
+    "write me a poem",
+    "roleplay as",
+    "let's play a game",
+    "what's your opinion on politics",
+    "who will win the election"
+  ]
+
+  if any($off_topic_patterns in $user_message.lower())
+    bot redirect to task
+    stop
+
+define bot redirect to task
+  "I'm focused on helping you with productive tasks like research, document creation, code development, and data analysis. Could you describe the task you'd like me to help with?"
+
+# ─── Output Relevance Check ─────────────────────────────────────────────
+
+define flow check output relevance
+  """Ensure bot output is relevant and professional."""
+
+  $blocked_content = [
+    "as an AI language model",
+    "I don't have personal opinions",
+    "I cannot provide medical advice",
+    "I cannot provide legal advice"
+  ]
+
+  # Allow the response but ensure it's task-focused
+  pass
+
+# ─── Irreversible Action Confirmation ───────────────────────────────────
+
+define flow confirm irreversible action
+  """Require explicit user confirmation before irreversible actions."""
+
+  $irreversible_keywords = [
+    "delete",
+    "remove permanently",
+    "send email",
+    "make payment",
+    "drop table",
+    "publish",
+    "deploy to production"
+  ]
+
+  if any($irreversible_keywords in $bot_message.lower())
+    bot request confirmation
+    when user confirms
+      continue
+    when user denies
+      bot acknowledge cancellation
+      stop
+
+define bot request confirmation
+  "This action is irreversible. Are you sure you want to proceed? Please confirm with 'yes' or 'no'."
+
+define bot acknowledge cancellation
+  "Understood. The action has been cancelled. Is there anything else I can help you with?"
