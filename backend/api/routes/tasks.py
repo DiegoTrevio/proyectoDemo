@@ -1,6 +1,8 @@
 """Task management endpoints."""
 
+import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -12,8 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas import ErrorResponse, TaskCreate, TaskListResponse, TaskResponse
 from config.model_router import select_model
 from config.settings import settings
-from db.database import get_db
+from db.database import async_session, get_db
 from db.models import Task
+
+logger = logging.getLogger("agentos.tasks")
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
@@ -84,7 +88,41 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
     await r.lpush("task_queue", task.id)
     await r.close()
 
+    # Launch orchestrator in background
+    asyncio.create_task(_run_orchestrator(task.id, task.goal, body.config))
+
     return _task_to_response(task)
+
+
+async def _run_orchestrator(task_id: str, goal: str, config: dict | None):
+    """Background coroutine: run orchestrator and update DB when done."""
+    from agents.orchestrator import run_task
+
+    # Update status to running
+    async with async_session() as db:
+        task = await db.get(Task, task_id)
+        if task:
+            task.status = "running"
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+    try:
+        final_output = await run_task(task_id, goal, config)
+        status = "completed"
+        result = {"output": final_output}
+    except Exception as e:
+        logger.exception("Orchestrator failed for task %s", task_id)
+        status = "failed"
+        result = {"error": str(e)}
+
+    # Persist final state
+    async with async_session() as db:
+        task = await db.get(Task, task_id)
+        if task:
+            task.status = status
+            task.result = result
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
 
 
 @router.get("/{task_id}", response_model=TaskResponse, responses={404: {"model": ErrorResponse}})
