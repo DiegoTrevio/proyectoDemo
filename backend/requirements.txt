@@ -15,3 +15,7 @@ pytest==8.3.4
 anyio==4.8.0
 pytest-asyncio==0.24.0
 aiosqlite==0.20.0
+tavily-python==0.5.0
+exa-py==1.8.3
+firecrawl-py==1.6.2
+mem0ai==0.1.42

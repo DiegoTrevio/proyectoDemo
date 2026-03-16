@@ -25,14 +25,28 @@ class _StubAgent:
         )
 
 
+def _build_registry() -> dict:
+    """Build agent registry with real implementations where available."""
+    registry: dict = {
+        "coder": _StubAgent("coder"),
+        "browser": _StubAgent("browser"),
+        "document_writer": _StubAgent("document_writer"),
+        "validator": _StubAgent("validator"),
+    }
+
+    # Register real Researcher agent
+    try:
+        from agents.researcher import ResearcherAgent
+        registry["researcher"] = ResearcherAgent()
+    except Exception as e:
+        logger.warning("Failed to load ResearcherAgent, using stub: %s", e)
+        registry["researcher"] = _StubAgent("researcher")
+
+    return registry
+
+
 # Agent registry — maps agent names to their implementations
-_AGENT_REGISTRY: dict[str, _StubAgent] = {
-    "researcher": _StubAgent("researcher"),
-    "coder": _StubAgent("coder"),
-    "browser": _StubAgent("browser"),
-    "document_writer": _StubAgent("document_writer"),
-    "validator": _StubAgent("validator"),
-}
+_AGENT_REGISTRY = _build_registry()
 
 
 def get_available_agents() -> list[str]:
