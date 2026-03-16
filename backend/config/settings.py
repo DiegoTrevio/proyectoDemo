@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Execution & Sandbox
     e2b_api_key: str = ""
     composio_api_key: str = ""
+    steel_api_key: str = ""
 
     # Memory
     mem0_api_key: str = ""
