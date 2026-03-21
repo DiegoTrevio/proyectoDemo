@@ -1,0 +1,63 @@
+services:
+  # ─── Test Database (isolated) ──────────────────────────────────────────
+  postgres-test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: secureagent_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  # ─── Test Redis (isolated) ─────────────────────────────────────────────
+  redis-test:
+    image: redis:7-alpine
+    tmpfs:
+      - /data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  # ─── Backend Tests ─────────────────────────────────────────────────────
+  backend-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python", "-m", "pytest", "tests/", "-v", "--tb=short"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://test:test@postgres-test:5432/secureagent_test
+      - REDIS_URL=redis://redis-test:6379/0
+      - TESTING=1
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    networks:
+      - test-network
+
+  # ─── SDK Tests ─────────────────────────────────────────────────────────
+  sdk-test:
+    image: python:3.12-slim
+    working_dir: /sdk
+    volumes:
+      - ./sdk:/sdk
+    command: >
+      sh -c "pip install -e '.[dev]' --quiet && python -m pytest tests/ -v --tb=short"
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
