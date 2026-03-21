@@ -56,6 +56,7 @@ class Settings(BaseSettings):
 
     # Security
     manifest_signing_key: str = ""
+    api_key_salt: str = "secureagent-key-salt-v1"
     cors_origins: str = "http://localhost:3000"  # Comma-separated list of allowed origins
 
     model_config = {"env_file": ".env", "extra": "ignore"}

@@ -1,21 +1,28 @@
 """Langfuse observability client for AgentOS."""
 
-from langfuse import Langfuse
+import logging
 
 from config.settings import settings
 
-langfuse: Langfuse | None = None
+logger = logging.getLogger("agentos.langfuse")
+
+langfuse = None
 
 
-def init_langfuse() -> Langfuse | None:
-    """Initialize Langfuse client. Returns None if keys are not configured."""
+def init_langfuse():
+    """Initialize Langfuse client. Returns None if keys are not configured or langfuse is not installed."""
     global langfuse
-    if settings.langfuse_public_key and settings.langfuse_secret_key:
+    if not settings.langfuse_public_key or not settings.langfuse_secret_key:
+        return None
+    try:
+        from langfuse import Langfuse
         langfuse = Langfuse(
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key,
             host=settings.langfuse_host,
         )
+    except ImportError:
+        logger.warning("langfuse package not installed — tracing disabled")
     return langfuse
 
 

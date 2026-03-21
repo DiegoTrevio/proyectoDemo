@@ -3,9 +3,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# Use JSONB on Postgres, fallback to JSON on SQLite/other
+JSONB = PG_JSONB().with_variant(JSON(), "sqlite")
 
 
 class Base(DeclarativeBase):
@@ -147,5 +150,5 @@ class AuditEventDB(Base):
     prev_hash: Mapped[str] = mapped_column(String(128), default="")
     event_hash: Mapped[str] = mapped_column(String(128), default="")
     signature: Mapped[str] = mapped_column(String(128), default="")
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    event_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     batch_id: Mapped[str | None] = mapped_column(String(64))

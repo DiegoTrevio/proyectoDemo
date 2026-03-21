@@ -13,7 +13,6 @@ Usage:
         # user.user_id, user.tenant_id, user.permissions available
 """
 
-import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -42,7 +41,9 @@ class AuthUser:
 
 def _hash_key(raw_key: str) -> str:
     """Hash an API key for lookup. Must match the hash used at key creation."""
-    return hashlib.sha256(raw_key.encode()).hexdigest()
+    import hashlib
+    salted = f"{settings.api_key_salt}:{raw_key}"
+    return hashlib.sha256(salted.encode()).hexdigest()
 
 
 async def _authenticate_api_key(

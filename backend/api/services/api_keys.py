@@ -6,7 +6,6 @@ Only the hash is stored; the raw key is shown once at creation time.
 
 import hashlib
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,17 +13,15 @@ from typing import Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.settings import settings
 from db.models import ApiKey, Tenant
 
 logger = logging.getLogger("agentos.services.api_keys")
 
-# Salt for key hashing (loaded from env or generated)
-_KEY_SALT = os.environ.get("API_KEY_SALT", "secureagent-key-salt-v1")
-
 
 def _hash_key(raw_key: str) -> str:
     """Hash an API key with salt using SHA-256."""
-    salted = f"{_KEY_SALT}:{raw_key}"
+    salted = f"{settings.api_key_salt}:{raw_key}"
     return hashlib.sha256(salted.encode()).hexdigest()
 
 

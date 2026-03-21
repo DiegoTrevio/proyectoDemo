@@ -44,7 +44,7 @@ async def save_audit_events(
                 prev_hash=event_data.get("prev_hash", ""),
                 event_hash=event_data.get("event_hash", ""),
                 signature=event_data.get("signature", ""),
-                metadata=event_data.get("metadata", {}),
+                event_metadata=event_data.get("metadata", {}),
                 batch_id=batch_id,
             )
             db.add(db_event)
@@ -95,7 +95,7 @@ async def get_audit_events(
             "tokens_used": e.tokens_used,
             "cost": e.cost,
             "event_hash": e.event_hash[:16] if e.event_hash else "",
-            "metadata": e.metadata,
+            "metadata": e.event_metadata,
         }
         for e in events
     ]
@@ -196,7 +196,7 @@ async def export_audit_chain(
             "prev_hash": e.prev_hash,
             "event_hash": e.event_hash,
             "signature": e.signature,
-            "metadata": e.metadata,
+            "metadata": e.event_metadata,
         }
         for e in events
     ]

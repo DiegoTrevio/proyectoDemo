@@ -5,6 +5,7 @@ Returns 429 Too Many Requests when limit exceeded.
 """
 
 import logging
+import os
 import time
 
 import redis.asyncio as aioredis
@@ -13,6 +14,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config.settings import settings
+
+_TESTING = os.environ.get("TESTING", "") == "1"
 
 logger = logging.getLogger("agentos.middleware.rate_limiter")
 
@@ -37,6 +40,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
+
+        # Skip rate limiting in test environment
+        if _TESTING:
+            return await call_next(request)
 
         # Skip exempt paths
         if path in EXEMPT_PATHS:
@@ -94,7 +101,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns (allowed, remaining, retry_after_seconds).
         """
         try:
-            r = aioredis.from_url(settings.redis_url)
+            r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
             try:
                 now = time.time()
                 key = f"ratelimit:{identifier}:{path_prefix}"
