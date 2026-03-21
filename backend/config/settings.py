@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
     # Security
     manifest_signing_key: str = ""
+    cors_origins: str = "http://localhost:3000"  # Comma-separated list of allowed origins
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

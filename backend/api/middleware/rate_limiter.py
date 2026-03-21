@@ -18,9 +18,14 @@ logger = logging.getLogger("agentos.middleware.rate_limiter")
 
 # Default rate limits (requests per minute)
 RATE_LIMITS = {
+    "/api/v1/tasks": 60,
+    "/api/v1/agents": 60,
     "/api/v1/ingest": 1000,
     "/api/v1/dashboard": 100,
     "/api/v1/keys": 30,
+    "/api/v1/billing": 60,
+    "/api/v1/memory": 120,
+    "/api/v1/stream": 30,
 }
 
 # Paths that are exempt from rate limiting

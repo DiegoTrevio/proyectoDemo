@@ -11,11 +11,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.middleware.auth import AuthUser, require_auth
 from api.schemas import ErrorResponse, TaskCreate, TaskListResponse, TaskResponse
 from config.model_router import select_model
 from config.settings import settings
 from db.database import async_session, get_db
 from db.models import Task
+
+# Allowed models that users can request
+_ALLOWED_MODELS = {
+    "agentOS/orchestrator", "agentOS/workhorse", "agentOS/workhorse-gemini",
+    "agentOS/workhorse-qwen", "agentOS/workhorse-kimi", "agentOS/cheap",
+    "agentOS/cheap-qwen", "agentOS/facts",
+}
 
 logger = logging.getLogger("agentos.tasks")
 
@@ -55,9 +63,15 @@ def _task_to_response(task: Task) -> TaskResponse:
 
 
 @router.post("", response_model=TaskResponse, status_code=201)
-async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
+async def create_task(
+    body: TaskCreate,
+    user: AuthUser = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """Create a new task and queue it for execution."""
     if body.model_preference:
+        if body.model_preference not in _ALLOWED_MODELS:
+            raise HTTPException(status_code=400, detail=f"Unknown model: {body.model_preference}")
         model = body.model_preference
     else:
         selection = select_model("code", "medium")
@@ -73,6 +87,7 @@ async def create_task(body: TaskCreate, db: AsyncSession = Depends(get_db)):
         config=body.config,
         estimated_cost=estimated_cost,
         budget_limit=body.budget_limit,
+        user_id=user.tenant_id,
     )
     db.add(task)
     await db.commit()
@@ -126,10 +141,17 @@ async def _run_orchestrator(task_id: str, goal: str, config: dict | None):
 
 
 @router.get("/{task_id}", response_model=TaskResponse, responses={404: {"model": ErrorResponse}})
-async def get_task(task_id: str, db: AsyncSession = Depends(get_db)):
+async def get_task(
+    task_id: str,
+    user: AuthUser = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """Get task status and artifacts."""
     task = await db.get(Task, task_id)
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Users can only see their own tasks
+    if task.user_id and task.user_id != user.tenant_id:
         raise HTTPException(status_code=404, detail="Task not found")
     return _task_to_response(task)
 
@@ -138,15 +160,22 @@ async def get_task(task_id: str, db: AsyncSession = Depends(get_db)):
 async def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    user: AuthUser = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """List tasks with pagination."""
+    """List tasks with pagination (scoped to tenant)."""
     offset = (page - 1) * page_size
-    total_result = await db.execute(select(func.count(Task.id)))
+
+    # Scope queries to the authenticated tenant
+    base_filter = select(Task).where(Task.user_id == user.tenant_id)
+
+    total_result = await db.execute(
+        select(func.count(Task.id)).where(Task.user_id == user.tenant_id)
+    )
     total = total_result.scalar_one()
 
     result = await db.execute(
-        select(Task).order_by(Task.created_at.desc()).offset(offset).limit(page_size)
+        base_filter.order_by(Task.created_at.desc()).offset(offset).limit(page_size)
     )
     tasks = result.scalars().all()
     return TaskListResponse(
@@ -158,10 +187,17 @@ async def list_tasks(
 
 
 @router.delete("/{task_id}", responses={404: {"model": ErrorResponse}})
-async def cancel_task(task_id: str, db: AsyncSession = Depends(get_db)):
+async def cancel_task(
+    task_id: str,
+    user: AuthUser = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """Cancel a queued or running task."""
     task = await db.get(Task, task_id)
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Users can only cancel their own tasks
+    if task.user_id and task.user_id != user.tenant_id:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status in ("completed", "cancelled"):
         raise HTTPException(status_code=400, detail=f"Task already {task.status}")

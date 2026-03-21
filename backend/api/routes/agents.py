@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.middleware.auth import AuthUser, require_auth
 from api.schemas import AgentCreate, AgentResponse
 from db.database import get_db
 from db.models import Agent
@@ -24,7 +25,7 @@ CORE_AGENTS = [
 
 
 @router.get("", response_model=list[AgentResponse])
-async def list_agents(db: AsyncSession = Depends(get_db)):
+async def list_agents(user: AuthUser = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """List all available agents (core + custom)."""
     from datetime import datetime, timezone
 
@@ -60,7 +61,7 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", response_model=AgentResponse, status_code=201)
-async def create_agent(body: AgentCreate, db: AsyncSession = Depends(get_db)):
+async def create_agent(body: AgentCreate, user: AuthUser = Depends(require_auth), db: AsyncSession = Depends(get_db)):
     """Create a custom agent."""
     existing = await db.execute(select(Agent).where(Agent.name == body.name))
     if existing.scalar_one_or_none():

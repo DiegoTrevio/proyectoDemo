@@ -1,12 +1,23 @@
-FROM node:20-slim
+FROM node:20-slim AS base
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY frontend/ .
 
+# Production build stage
+FROM base AS production
+RUN npm run build
 EXPOSE 3000
+CMD ["npm", "run", "start"]
 
+# Development stage (default)
+FROM base AS development
+EXPOSE 3000
 CMD ["npm", "run", "dev"]

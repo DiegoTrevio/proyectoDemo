@@ -13,7 +13,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { TaskInput } from "@/components/TaskInput";
-import { createTask, listTasks, type Task } from "@/lib/api";
+import { createTask, listTasks, loadApiKey, setApiKey, clearApiKey, ApiError, type Task } from "@/lib/api";
 
 const STATUS_CONFIG: Record<
   string,
@@ -31,25 +31,66 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [needsAuth, setNeedsAuth] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+
+  // Load API key from localStorage on mount
+  useEffect(() => {
+    const key = loadApiKey();
+    if (!key) {
+      setNeedsAuth(true);
+    }
+  }, []);
+
+  const handleLogin = () => {
+    if (apiKeyInput.trim()) {
+      setApiKey(apiKeyInput.trim());
+      setNeedsAuth(false);
+      setError(null);
+      fetchTasks();
+    }
+  };
+
+  const handleLogout = () => {
+    clearApiKey();
+    setNeedsAuth(true);
+    setTasks([]);
+  };
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await listTasks(1, 20);
       setTasks(data.tasks || []);
-    } catch {
-      // API not available yet
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.isUnauthorized) {
+          setNeedsAuth(true);
+          setError("API key is invalid or expired. Please enter a valid key.");
+        } else if (err.isRateLimited) {
+          setError("Rate limit exceeded. Please wait a moment and try again.");
+        } else {
+          setError(`API error: ${err.message}`);
+        }
+      } else {
+        setError("Cannot connect to AgentOS backend. Is the server running?");
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+    if (!needsAuth) {
+      fetchTasks();
+    }
+  }, [fetchTasks, needsAuth]);
 
   const handleSubmit = async (goal: string, model: string, budgetLimit: number) => {
     setSubmitting(true);
+    setError(null);
     try {
       const task = await createTask({
         goal,
@@ -57,14 +98,55 @@ export default function Dashboard() {
         budget_limit: budgetLimit,
       });
       router.push(`/task/${task.id}`);
-    } catch {
-      // Fallback: navigate with placeholder
-      const fakeId = Date.now().toString(36);
-      router.push(`/task/${fakeId}`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.isUnauthorized) {
+          setNeedsAuth(true);
+          setError("Session expired. Please log in again.");
+        } else {
+          setError(`Failed to create task: ${err.message}`);
+        }
+      } else {
+        setError("Cannot connect to AgentOS backend. Is the server running?");
+      }
     } finally {
       setSubmitting(false);
     }
   };
+
+  // ── Auth screen ──
+  if (needsAuth) {
+    return (
+      <div className="max-w-md mx-auto px-6 py-24">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold tracking-tight mb-2">Welcome to AgentOS</h1>
+          <p className="text-[13px] text-text-secondary">Enter your API key to get started.</p>
+        </div>
+        {error && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-[13px] text-accent-red">
+            {error}
+          </div>
+        )}
+        <div className="space-y-3">
+          <input
+            type="password"
+            value={apiKeyInput}
+            onChange={(e) => setApiKeyInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+            placeholder="sa_live_..."
+            className="w-full px-4 py-3 rounded-xl border border-border bg-bg-card text-[13px] font-mono placeholder:text-text-tertiary focus:outline-none focus:border-accent-blue"
+          />
+          <button
+            onClick={handleLogin}
+            disabled={!apiKeyInput.trim()}
+            className="w-full px-4 py-3 rounded-xl bg-accent-blue text-white text-[13px] font-medium hover:bg-accent-blue/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Connect
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const stats = {
     total: tasks.length,
@@ -74,6 +156,20 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-[1400px] mx-auto px-6 py-12">
+      {/* Error banner */}
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 px-4 py-3 rounded-lg bg-accent-red/10 border border-accent-red/20 flex items-center justify-between"
+        >
+          <span className="text-[13px] text-accent-red">{error}</span>
+          <button onClick={() => setError(null)} className="text-accent-red/60 hover:text-accent-red text-sm ml-4">
+            Dismiss
+          </button>
+        </motion.div>
+      )}
+
       {/* Hero section */}
       <div className="text-center mb-12">
         <motion.h1

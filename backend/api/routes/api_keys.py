@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.middleware.auth import AuthUser, require_auth
 from api.services.api_keys import (
     create_api_key,
     create_tenant,
@@ -74,6 +75,7 @@ async def create_tenant_endpoint(
 @router.post("", response_model=CreateKeyResponse)
 async def create_key_endpoint(
     request: CreateKeyRequest,
+    user: AuthUser = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new API key for a tenant.
@@ -97,9 +99,13 @@ async def create_key_endpoint(
 @router.get("")
 async def list_keys_endpoint(
     tenant_id: str,
+    user: AuthUser = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """List all API keys for a tenant (keys are not revealed)."""
+    # Users can only list their own tenant's keys
+    if tenant_id != user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot access another tenant's keys")
     keys = await list_api_keys(db, tenant_id=tenant_id)
     return {"keys": keys, "total": len(keys)}
 
@@ -107,9 +113,13 @@ async def list_keys_endpoint(
 @router.delete("")
 async def revoke_key_endpoint(
     request: RevokeKeyRequest,
+    user: AuthUser = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke an API key."""
+    # Users can only revoke their own tenant's keys
+    if request.tenant_id != user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot revoke another tenant's keys")
     revoked = await revoke_api_key(db, key_id=request.key_id, tenant_id=request.tenant_id)
     if not revoked:
         raise HTTPException(status_code=404, detail="API key not found")

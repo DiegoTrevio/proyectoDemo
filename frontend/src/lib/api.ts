@@ -3,6 +3,58 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
 
+// ── Auth ─────────────────────────────────────────────────────────────────
+
+let _apiKey: string | null = null;
+
+/** Set the API key for all subsequent requests. */
+export function setApiKey(key: string) {
+  _apiKey = key;
+  if (typeof window !== "undefined") {
+    localStorage.setItem("agentos_api_key", key);
+  }
+}
+
+/** Load API key from localStorage on init. */
+export function loadApiKey(): string | null {
+  if (typeof window !== "undefined") {
+    _apiKey = localStorage.getItem("agentos_api_key");
+  }
+  return _apiKey;
+}
+
+/** Clear stored API key. */
+export function clearApiKey() {
+  _apiKey = null;
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("agentos_api_key");
+  }
+}
+
+function _authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (_apiKey) {
+    headers["Authorization"] = `Bearer ${_apiKey}`;
+  }
+  return headers;
+}
+
+/** Custom error class for API errors with status codes. */
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+  get isUnauthorized() {
+    return this.status === 401;
+  }
+
+  get isRateLimited() {
+    return this.status === 429;
+  }
+}
+
 // ── Types ────────────────────────────────────────────────────────────────
 
 export interface Task {
@@ -58,6 +110,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: {
       "Content-Type": "application/json",
+      ..._authHeaders(),
       ...options?.headers,
     },
     ...options,
@@ -65,7 +118,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API error ${res.status}: ${text}`);
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
   }
 
   return res.json();

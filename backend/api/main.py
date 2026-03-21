@@ -61,22 +61,33 @@ app = FastAPI(
 app.add_middleware(RateLimitMiddleware)
 
 # ─── CORS ──────────────────────────────────────────────────────────────────
+_cors_origins = [
+    o.strip()
+    for o in (settings.cors_origins or "http://localhost:3000").split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 
-# ─── Request-ID middleware ─────────────────────────────────────────────────
+# ─── Security + Request-ID middleware ──────────────────────────────────────
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
+async def security_headers_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex)
     logger.info("request_id=%s method=%s path=%s", request_id, request.method, request.url.path)
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
