@@ -9,13 +9,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import agents, billing, dashboard, ingest, memory, stream, tasks
+from api.middleware.rate_limiter import RateLimitMiddleware
+from api.routes import agents, api_keys, billing, dashboard, ingest, memory, stream, tasks
 from api.websocket import router as ws_router
 from config.langfuse_client import init_langfuse
+from config.logging_config import setup_logging
 from config.settings import settings
 from db.database import engine
 from db.models import Base
 
+setup_logging()
 logger = logging.getLogger("agentos")
 
 
@@ -54,6 +57,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ─── Rate Limiting ────────────────────────────────────────────────────────
+app.add_middleware(RateLimitMiddleware)
+
 # ─── CORS ──────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -80,7 +86,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error: %s", exc)
     return JSONResponse(
         status_code=500,
-        content={"error": "internal_error", "detail": str(exc)},
+        content={"error": "internal_error", "detail": "An unexpected error occurred."},
     )
 
 
@@ -93,6 +99,7 @@ app.include_router(memory.router)
 app.include_router(ws_router)
 app.include_router(ingest.router)
 app.include_router(dashboard.router)
+app.include_router(api_keys.router)
 
 
 @app.get("/health")

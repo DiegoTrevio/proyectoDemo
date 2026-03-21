@@ -17,21 +17,24 @@ Usage:
     trail = agent.export_audit_trail()
 """
 
-from secureagent.core import SecureAgent
-from secureagent.taint import TaintTracker, TaintLabel, TaintSource, TaintedContent
-from secureagent.audit import AuditLog, AuditEvent
+from secureagent.core import SecureAgent, SecurityViolation
+from secureagent.taint import TaintTracker, TaintLabel, TaintSource, TaintedContent, TaintViolation
+from secureagent.audit import AuditLog, AuditEvent, StorageBackend
 from secureagent.gates import ApprovalGate, RiskLevel
 from secureagent.pii import PIIDetector
 
 __version__ = "0.1.0"
 __all__ = [
     "SecureAgent",
+    "SecurityViolation",
     "TaintTracker",
     "TaintLabel",
     "TaintSource",
     "TaintedContent",
+    "TaintViolation",
     "AuditLog",
     "AuditEvent",
+    "StorageBackend",
     "ApprovalGate",
     "RiskLevel",
     "PIIDetector",

@@ -3,14 +3,23 @@
 All content from external sources (web scraping, APIs, user documents, search
 results) carries a TaintLabel. Tainted content cannot trigger destructive
 tool calls without explicit human approval.
+
+Features:
+- Full SHA-256 hash with configurable salt (prevents collisions + precomputation)
+- Strict mode: unknown content blocked from destructive tools
+- Launder audit trail with callback
+- Bounded registry with TTL-based eviction
 """
 
 import hashlib
 import logging
+import os
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger("secureagent.taint")
 
@@ -74,17 +83,30 @@ class TaintedContent:
     label: TaintLabel
     laundered: bool = False
     laundered_by: str = ""
+    created_at: float = 0.0  # time.monotonic() for TTL
+
+    def __post_init__(self):
+        if self.created_at == 0.0:
+            self.created_at = time.monotonic()
 
     @property
     def is_tainted(self) -> bool:
         return not self.laundered and self.label.trust_level < 0.9
 
 
+# Type for launder callback
+LaunderCallback = Callable[[str, str, "TaintLabel"], None]
+
+
 class TaintTracker:
     """Tracks and validates taint labels across the agent pipeline.
 
     Usage:
+        # Basic
         tracker = TaintTracker()
+
+        # Production (strict mode + salt)
+        tracker = TaintTracker(strict_mode=True, salt="random-secret")
 
         # Label incoming external content
         tc = tracker.label("some web content", TaintSource.WEB_SCRAPING)
@@ -100,9 +122,25 @@ class TaintTracker:
         tracker.validate_tool_call("some web content", "send_email")  # OK
     """
 
-    def __init__(self, custom_destructive_tools: Optional[set[str]] = None):
+    def __init__(
+        self,
+        custom_destructive_tools: Optional[set[str]] = None,
+        strict_mode: bool = False,
+        salt: Optional[str] = None,
+        max_entries: int = 50_000,
+        ttl_seconds: int = 3600,
+        on_launder: Optional[LaunderCallback] = None,
+    ):
         self._registry: dict[str, TaintedContent] = {}
         self._destructive_tools = DESTRUCTIVE_TOOLS | (custom_destructive_tools or set())
+        self._strict_mode = strict_mode
+        self._salt = salt or os.urandom(16).hex()
+        self._max_entries = max_entries
+        self._ttl_seconds = ttl_seconds
+        self._on_launder = on_launder
+        self._lock = threading.Lock()
+        self._ops_since_cleanup = 0
+        self._cleanup_interval = 1000  # cleanup every N operations
 
     def label(
         self,
@@ -115,11 +153,26 @@ class TaintTracker:
         label = TaintLabel(
             source=source,
             trust_level=min(max(trust_level, 0.0), 1.0),
-            original_source=original_source,
+            original_source=original_source[:500],  # Limit source length
             chain=[f"ingested:{source.value}"],
         )
         tc = TaintedContent(content=content, label=label)
-        self._registry[self._hash(content)] = tc
+
+        with self._lock:
+            self._maybe_cleanup()
+            content_hash = self._hash(content)
+
+            # Enforce max entries
+            if len(self._registry) >= self._max_entries and content_hash not in self._registry:
+                self._evict_expired()
+                if len(self._registry) >= self._max_entries:
+                    # Evict oldest entry
+                    oldest_key = min(self._registry, key=lambda k: self._registry[k].created_at)
+                    del self._registry[oldest_key]
+                    logger.warning("Taint registry full (%d), evicted oldest entry", self._max_entries)
+
+            self._registry[content_hash] = tc
+
         logger.debug("Labeled: source=%s trust=%.2f", source.value, trust_level)
         return tc
 
@@ -132,17 +185,31 @@ class TaintTracker:
             chain=original.label.chain + ["transformed"],
         )
         tc = TaintedContent(content=transformed_content, label=new_label)
-        self._registry[self._hash(transformed_content)] = tc
+        with self._lock:
+            self._registry[self._hash(transformed_content)] = tc
         return tc
 
     def validate_tool_call(self, content: str, tool_name: str) -> bool:
         """Validate whether content can trigger a tool call.
 
         Returns True if allowed, raises TaintViolation if blocked.
-        """
-        tc = self._registry.get(self._hash(content))
 
-        if tc is None or not tc.is_tainted:
+        In strict_mode, unknown content (not in registry) is blocked from
+        destructive tools. In normal mode, unknown content passes.
+        """
+        with self._lock:
+            tc = self._registry.get(self._hash(content))
+
+        if tc is None:
+            if self._strict_mode and tool_name in self._destructive_tools:
+                raise TaintViolation(
+                    f"Unknown content cannot trigger destructive tool '{tool_name}' "
+                    f"in strict mode — content must be explicitly registered",
+                    tool=tool_name,
+                )
+            return True
+
+        if not tc.is_tainted:
             return True
 
         if tool_name not in self._destructive_tools:
@@ -157,26 +224,73 @@ class TaintTracker:
         )
 
     def launder(self, content: str, approved_by: str) -> bool:
-        """Mark content as trusted after human approval."""
-        tc = self._registry.get(self._hash(content))
-        if tc is None:
+        """Mark content as trusted after human approval.
+
+        Records who approved and when. Calls on_launder callback if set.
+        """
+        if not approved_by:
+            logger.warning("launder() called with empty approved_by — rejected")
             return False
-        tc.laundered = True
-        tc.laundered_by = approved_by
-        tc.label.chain.append(f"laundered_by:{approved_by}")
-        logger.info("Content laundered by %s", approved_by)
+
+        with self._lock:
+            content_hash = self._hash(content)
+            tc = self._registry.get(content_hash)
+
+            if tc is None:
+                return False
+
+            tc.laundered = True
+            tc.laundered_by = approved_by
+            tc.label.chain.append(f"laundered_by:{approved_by}:{datetime.now(timezone.utc).isoformat()}")
+
+        logger.info("Content laundered by %s (source=%s)", approved_by, tc.label.source.value)
+
+        # Call callback outside lock to avoid deadlocks
+        if self._on_launder:
+            try:
+                self._on_launder(content, approved_by, tc.label)
+            except Exception as e:
+                logger.error("on_launder callback failed: %s", e)
+
         return True
 
     def is_tainted(self, content: str) -> bool:
         """Check if content is tainted."""
-        tc = self._registry.get(self._hash(content))
+        with self._lock:
+            tc = self._registry.get(self._hash(content))
         return tc.is_tainted if tc else False
 
     def get_label(self, content: str) -> Optional[TaintLabel]:
         """Get the taint label for content."""
-        tc = self._registry.get(self._hash(content))
+        with self._lock:
+            tc = self._registry.get(self._hash(content))
         return tc.label if tc else None
 
-    @staticmethod
-    def _hash(content: str) -> str:
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+    @property
+    def registry_size(self) -> int:
+        """Current number of entries in the registry."""
+        return len(self._registry)
+
+    def _hash(self, content: str) -> str:
+        """Full SHA-256 hash with salt."""
+        salted = f"{self._salt}:{content}"
+        return hashlib.sha256(salted.encode()).hexdigest()
+
+    def _maybe_cleanup(self) -> None:
+        """Periodic cleanup of expired entries (called under lock)."""
+        self._ops_since_cleanup += 1
+        if self._ops_since_cleanup >= self._cleanup_interval:
+            self._evict_expired()
+            self._ops_since_cleanup = 0
+
+    def _evict_expired(self) -> None:
+        """Remove entries older than TTL (called under lock)."""
+        now = time.monotonic()
+        expired = [
+            k for k, v in self._registry.items()
+            if (now - v.created_at) > self._ttl_seconds
+        ]
+        for k in expired:
+            del self._registry[k]
+        if expired:
+            logger.debug("Evicted %d expired taint entries", len(expired))

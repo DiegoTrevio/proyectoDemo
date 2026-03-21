@@ -1,7 +1,7 @@
 """SecureAgent SDK — Dashboard API.
 
-Provides endpoints for the audit dashboard: event listing, chain verification,
-compliance reports, and usage statistics.
+Provides tenant-isolated endpoints for the audit dashboard: event listing,
+chain verification, compliance reports, and usage statistics.
 """
 
 import logging
@@ -9,23 +9,43 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from security.merkle_audit import audit_chain
+from api.services.api_keys import validate_api_key
+from api.services.audit_storage import (
+    export_audit_chain,
+    get_audit_events,
+    get_audit_stats,
+    get_sessions,
+)
+from db.database import get_db
+from db.models import ApiKey
 
 logger = logging.getLogger("agentos.api.dashboard")
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
-# ─── Auth ───────────────────────────────────────────────────────────────
+# ─── Auth dependency ────────────────────────────────────────────────────
 
-async def verify_api_key(authorization: str = Header(...)) -> str:
+async def get_authenticated_key(
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+) -> ApiKey:
+    """Validate API key and return the key record with tenant_id."""
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    api_key = authorization[7:]
-    if not api_key or len(api_key) < 8:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise HTTPException(status_code=401, detail="Invalid authorization header format")
+
+    raw_key = authorization[7:]
+    api_key = await validate_api_key(db, raw_key)
+
+    if api_key is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired API key")
+
+    if not api_key.permissions.get("dashboard", False):
+        raise HTTPException(status_code=403, detail="API key does not have dashboard permission")
+
     return api_key
 
 
@@ -41,7 +61,6 @@ class ChainVerification(BaseModel):
 class ComplianceReport(BaseModel):
     session_id: str
     generated_at: str
-    chain_valid: bool
     total_events: int
     high_risk_events: int
     pii_detections: int
@@ -51,11 +70,9 @@ class ComplianceReport(BaseModel):
 
 
 class UsageStats(BaseModel):
-    session_id: str
     total_events: int
     total_tokens: int
     total_cost: float
-    agents: list[str]
     first_event: str
     last_event: str
 
@@ -64,69 +81,40 @@ class UsageStats(BaseModel):
 
 @router.get("/events")
 async def list_events(
-    session_id: str = Query(..., description="Session ID to query"),
-    agent_id: Optional[str] = Query(None, description="Filter by agent ID"),
-    action: Optional[str] = Query(None, description="Filter by action type"),
+    session_id: str = Query(..., max_length=128),
+    agent_id: Optional[str] = Query(None, max_length=100),
+    action: Optional[str] = Query(None, max_length=64),
     limit: int = Query(100, ge=1, le=1000),
-    api_key: str = Depends(verify_api_key),
+    offset: int = Query(0, ge=0),
+    api_key: ApiKey = Depends(get_authenticated_key),
+    db: AsyncSession = Depends(get_db),
 ):
-    """List audit events for a session with optional filters."""
-    chain = audit_chain._chains.get(session_id, [])
-
-    events = []
-    for event in chain:
-        if agent_id and event.agent_id != agent_id:
-            continue
-        if action and event.action != action:
-            continue
-        events.append({
-            "event_id": event.event_id,
-            "timestamp": event.timestamp,
-            "agent_id": event.agent_id,
-            "action": event.action,
-            "tool_name": event.metadata.get("tool_name", ""),
-            "risk_level": event.metadata.get("risk_level", "low"),
-            "model_used": event.model_used,
-            "tokens_used": event.tokens_used,
-            "cost": event.cost,
-            "event_hash": event.event_hash[:16],
-        })
-        if len(events) >= limit:
-            break
-
-    return {"session_id": session_id, "events": events, "total": len(events)}
-
-
-@router.get("/verify", response_model=ChainVerification)
-async def verify_chain(
-    session_id: str = Query(..., description="Session ID to verify"),
-    api_key: str = Depends(verify_api_key),
-):
-    """Verify integrity of the audit chain for a session."""
-    valid, message = audit_chain.verify_chain(session_id)
-    chain = audit_chain._chains.get(session_id, [])
-    return ChainVerification(
+    """List audit events for a session (tenant-isolated)."""
+    events = await get_audit_events(
+        db,
+        tenant_id=api_key.tenant_id,
         session_id=session_id,
-        valid=valid,
-        message=message,
-        events=len(chain),
+        agent_id=agent_id,
+        action=action,
+        limit=limit,
+        offset=offset,
     )
+    return {"session_id": session_id, "events": events, "total": len(events)}
 
 
 @router.get("/audit/export")
 async def export_audit(
-    session_id: str = Query(..., description="Session ID to export"),
-    api_key: str = Depends(verify_api_key),
+    session_id: str = Query(..., max_length=128),
+    api_key: ApiKey = Depends(get_authenticated_key),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Export full audit trail for SOC2/GDPR compliance."""
-    trail = audit_chain.export_chain(session_id)
-    valid, message = audit_chain.verify_chain(session_id)
+    """Export full audit trail for SOC2/GDPR compliance (tenant-isolated)."""
+    trail = await export_audit_chain(db, tenant_id=api_key.tenant_id, session_id=session_id)
 
     return {
         "session_id": session_id,
+        "tenant_id": api_key.tenant_id,
         "exported_at": datetime.now(timezone.utc).isoformat(),
-        "chain_valid": valid,
-        "chain_message": message,
         "total_events": len(trail),
         "events": trail,
     }
@@ -134,24 +122,22 @@ async def export_audit(
 
 @router.get("/compliance/report", response_model=ComplianceReport)
 async def compliance_report(
-    session_id: str = Query(..., description="Session ID for the report"),
-    api_key: str = Depends(verify_api_key),
+    session_id: str = Query(..., max_length=128),
+    api_key: ApiKey = Depends(get_authenticated_key),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Generate a compliance report for a session."""
-    chain = audit_chain._chains.get(session_id, [])
-    valid, message = audit_chain.verify_chain(session_id)
-    trail = audit_chain.export_chain(session_id)
+    """Generate a compliance report for a session (tenant-isolated)."""
+    trail = await export_audit_chain(db, tenant_id=api_key.tenant_id, session_id=session_id)
 
-    high_risk = sum(1 for e in chain if e.metadata.get("risk_level") == "high")
-    pii = sum(1 for e in chain if e.action == "pii_detected")
-    taint = sum(1 for e in chain if e.action == "taint_violation")
-    rejections = sum(1 for e in chain if e.action == "approval_rejected")
+    high_risk = sum(1 for e in trail if e.get("risk_level") == "high")
+    pii = sum(1 for e in trail if e.get("action") == "pii_detected")
+    taint = sum(1 for e in trail if e.get("action") == "taint_violation")
+    rejections = sum(1 for e in trail if e.get("action") == "approval_rejected")
 
     return ComplianceReport(
         session_id=session_id,
         generated_at=datetime.now(timezone.utc).isoformat(),
-        chain_valid=valid,
-        total_events=len(chain),
+        total_events=len(trail),
         high_risk_events=high_risk,
         pii_detections=pii,
         taint_violations=taint,
@@ -162,39 +148,28 @@ async def compliance_report(
 
 @router.get("/stats", response_model=UsageStats)
 async def usage_stats(
-    session_id: str = Query(..., description="Session ID for stats"),
-    api_key: str = Depends(verify_api_key),
+    session_id: Optional[str] = Query(None, max_length=128),
+    api_key: ApiKey = Depends(get_authenticated_key),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get usage statistics for a session."""
-    stats = audit_chain.get_chain_stats(session_id)
+    """Get usage statistics (tenant-isolated)."""
+    stats = await get_audit_stats(db, tenant_id=api_key.tenant_id, session_id=session_id)
 
     return UsageStats(
-        session_id=session_id,
-        total_events=stats.get("events", 0),
-        total_tokens=stats.get("total_tokens", 0),
-        total_cost=stats.get("total_cost", 0.0),
-        agents=stats.get("agents", []),
-        first_event=stats.get("first_event", ""),
-        last_event=stats.get("last_event", ""),
+        total_events=stats["total_events"],
+        total_tokens=stats["total_tokens"],
+        total_cost=stats["total_cost"],
+        first_event=stats["first_event"],
+        last_event=stats["last_event"],
     )
 
 
 @router.get("/sessions")
 async def list_sessions(
-    api_key: str = Depends(verify_api_key),
     limit: int = Query(50, ge=1, le=200),
+    api_key: ApiKey = Depends(get_authenticated_key),
+    db: AsyncSession = Depends(get_db),
 ):
-    """List all active sessions with summary stats."""
-    sessions = []
-    for session_id, chain in list(audit_chain._chains.items())[:limit]:
-        if not chain:
-            continue
-        sessions.append({
-            "session_id": session_id,
-            "events": len(chain),
-            "first_event": chain[0].timestamp,
-            "last_event": chain[-1].timestamp,
-            "agents": list(set(e.agent_id for e in chain)),
-        })
-
+    """List all sessions for the tenant."""
+    sessions = await get_sessions(db, tenant_id=api_key.tenant_id, limit=limit)
     return {"sessions": sessions, "total": len(sessions)}

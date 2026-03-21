@@ -2,19 +2,31 @@
 
 Wraps any AI agent's tool calls with enterprise security:
 taint tracking, PII detection, audit trails, and approval gates.
+
+Features:
+- Input validation on tool names and args
+- Configurable audit signing
+- Taint strict mode support
+- Output truncation with indicator
 """
 
 import logging
+import re
 import uuid
 from typing import Any, Callable, Coroutine, Optional
 
-from secureagent.audit import AuditLog
+from secureagent.audit import AuditLog, StorageBackend
 from secureagent.cloud import CloudClient
 from secureagent.gates import ApprovalCallback, ApprovalGate, RiskLevel
 from secureagent.pii import PIIDetector
 from secureagent.taint import TaintSource, TaintTracker, TaintViolation
 
 logger = logging.getLogger("secureagent")
+
+# Validation patterns
+_TOOL_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_.\-]{1,100}$')
+_MAX_ARG_VALUE_SIZE = 50_000  # 50KB per arg value
+_MAX_AUDIT_OUTPUT_SIZE = 2000  # Truncate output for audit at 2KB
 
 
 class SecurityViolation(Exception):
@@ -24,6 +36,27 @@ class SecurityViolation(Exception):
         self.violation_type = violation_type
         self.details = details or {}
         super().__init__(message)
+
+
+def _validate_tool_name(tool_name: str) -> str:
+    """Validate tool name format."""
+    if not tool_name:
+        raise ValueError("tool_name cannot be empty")
+    if not _TOOL_NAME_PATTERN.match(tool_name):
+        raise ValueError(
+            f"Invalid tool_name '{tool_name[:50]}': must match [a-zA-Z0-9_.\\-]{{1,100}}"
+        )
+    return tool_name
+
+
+def _truncate(text: str, max_size: int, label: str = "") -> str:
+    """Truncate text with indicator if too long."""
+    if len(text) <= max_size:
+        return text
+    suffix = f" [TRUNCATED from {len(text)} chars]"
+    if label:
+        suffix = f" [TRUNCATED {label} from {len(text)} chars]"
+    return text[:max_size - len(suffix)] + suffix
 
 
 class SecureAgent:
@@ -37,10 +70,11 @@ class SecureAgent:
             pii_detection=True,
             audit_log=True,
             approval_gates={"send_email": "high", "search_web": "low"},
-            cloud_api_key="sk-...",  # Optional: send to dashboard
+            audit_signing_key="your-secret",  # HMAC signing
+            taint_strict_mode=True,            # Block unknown content
+            cloud_api_key="sk-...",            # Optional dashboard
         )
 
-        # Secure a tool call
         result = await agent.secure_call(
             tool_name="send_email",
             tool_fn=my_send_email_function,
@@ -48,15 +82,6 @@ class SecureAgent:
             agent_id="email_agent",
             session_id="sess_123",
         )
-
-        # Check for PII before sending to LLM
-        clean_text = agent.redact_pii("My email is john@test.com")
-
-        # Export audit trail
-        trail = agent.export_audit("sess_123")
-
-        # Verify audit chain integrity
-        valid, msg = agent.verify_audit("sess_123")
     """
 
     def __init__(
@@ -71,10 +96,24 @@ class SecureAgent:
         cloud_api_key: Optional[str] = None,
         cloud_base_url: Optional[str] = None,
         custom_destructive_tools: Optional[set[str]] = None,
+        # New hardening options
+        audit_signing_key: Optional[str] = None,
+        audit_storage: Optional[StorageBackend] = None,
+        audit_max_events: int = 10_000,
+        taint_strict_mode: bool = False,
+        taint_salt: Optional[str] = None,
+        taint_max_entries: int = 50_000,
+        taint_ttl_seconds: int = 3600,
     ):
         # Taint tracking
         self._taint_enabled = taint_tracking
-        self._taint = TaintTracker(custom_destructive_tools=custom_destructive_tools) if taint_tracking else None
+        self._taint = TaintTracker(
+            custom_destructive_tools=custom_destructive_tools,
+            strict_mode=taint_strict_mode,
+            salt=taint_salt,
+            max_entries=taint_max_entries,
+            ttl_seconds=taint_ttl_seconds,
+        ) if taint_tracking else None
 
         # PII detection
         self._pii_enabled = pii_detection
@@ -83,7 +122,11 @@ class SecureAgent:
 
         # Audit log
         self._audit_enabled = audit_log
-        self._audit = AuditLog() if audit_log else None
+        self._audit = AuditLog(
+            signing_key=audit_signing_key,
+            storage=audit_storage,
+            max_events_per_session=audit_max_events,
+        ) if audit_log else None
 
         # Approval gates
         self._gates = ApprovalGate(
@@ -113,19 +156,31 @@ class SecureAgent:
         """Execute a tool call through the full security pipeline.
 
         Pipeline order:
-        1. PII scan on input args
-        2. Taint validation (if input context is tainted)
-        3. Approval gate check
-        4. Execute tool
-        5. PII scan on output (optional blocking)
-        6. Audit log
-        7. Cloud event (if configured)
+        1. Validate inputs (tool_name, args)
+        2. PII scan on input args
+        3. Taint validation (if input context is tainted)
+        4. Approval gate check
+        5. Execute tool
+        6. PII scan on output (optional blocking)
+        7. Audit log
+        8. Cloud event (if configured)
 
         Returns the tool function result.
         Raises SecurityViolation if any check fails.
+        Raises ValueError if inputs are invalid.
         """
+        # 0. Validate inputs
+        _validate_tool_name(tool_name)
         session_id = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         args = args or {}
+
+        # Validate arg values aren't excessively large
+        for key, value in args.items():
+            if isinstance(value, str) and len(value) > _MAX_ARG_VALUE_SIZE:
+                logger.warning(
+                    "Arg '%s' for tool '%s' is %d bytes (max %d) — truncating for audit only",
+                    key, tool_name, len(value), _MAX_ARG_VALUE_SIZE,
+                )
 
         # 1. PII scan on input
         if self._pii_enabled and self._pii:
@@ -177,12 +232,14 @@ class SecureAgent:
         try:
             result = await tool_fn(**args)
         except Exception as e:
-            self._log_audit(session_id, agent_id, "tool_error", tool_name, str(args), str(e), "medium")
-            self._emit_cloud_event("tool_error", tool_name, session_id, agent_id, {"error": str(e)})
+            error_msg = _truncate(str(e), 500)
+            args_str = _truncate(str(args), 500)
+            self._log_audit(session_id, agent_id, "tool_error", tool_name, args_str, error_msg, "medium")
+            self._emit_cloud_event("tool_error", tool_name, session_id, agent_id, {"error": error_msg})
             raise
 
         # 5. PII scan on output
-        result_str = str(result) if result is not None else ""
+        result_str = _truncate(str(result), _MAX_AUDIT_OUTPUT_SIZE) if result is not None else ""
         if self._pii_enabled and self._pii and result_str:
             if self._pii.contains_pii(result_str):
                 pii_matches = self._pii.detect(result_str)
@@ -192,9 +249,10 @@ class SecureAgent:
 
         # 6. Audit log
         risk = self._gates.get_risk(tool_name).value if self._gates else "low"
+        args_str = _truncate(str(args), _MAX_AUDIT_OUTPUT_SIZE)
         self._log_audit(
             session_id, agent_id, "tool_call", tool_name,
-            str(args), result_str[:500], risk, model_used,
+            args_str, result_str, risk, model_used,
         )
 
         # 7. Cloud event

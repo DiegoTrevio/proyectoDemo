@@ -73,3 +73,58 @@ class Usage(Base):
     cost: Mapped[float] = mapped_column(Float, default=0.0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─── SecureAgent SDK Models ─────────────────────────────────────────────
+
+class Tenant(Base):
+    """Organization / customer account."""
+    __tablename__ = "tenants"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    plan: Mapped[str] = mapped_column(String(32), default="free")  # free, cloud, enterprise
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class ApiKey(Base):
+    """API key for SDK authentication."""
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)  # sa_live_xxxx for display
+    tenant_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), default="Default Key")
+    permissions: Mapped[dict] = mapped_column(JSONB, default=dict)  # {"ingest": true, "dashboard": true}
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AuditEventDB(Base):
+    """Persistent audit event from SDK."""
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    agent_id: Mapped[str] = mapped_column(String(128), default="default")
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(128), default="")
+    input_hash: Mapped[str] = mapped_column(String(128), default="")
+    output_hash: Mapped[str] = mapped_column(String(128), default="")
+    model_used: Mapped[str] = mapped_column(String(128), default="")
+    tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    cost: Mapped[float] = mapped_column(Float, default=0.0)
+    risk_level: Mapped[str] = mapped_column(String(16), default="low")
+    prev_hash: Mapped[str] = mapped_column(String(128), default="")
+    event_hash: Mapped[str] = mapped_column(String(128), default="")
+    signature: Mapped[str] = mapped_column(String(128), default="")
+    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    batch_id: Mapped[str | None] = mapped_column(String(64))
