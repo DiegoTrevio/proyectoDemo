@@ -56,6 +56,12 @@ You receive a user goal, break it into sub-tasks, assign each to the right speci
 - browser: Navigate websites, fill forms, extract data
 - document_writer: Create documents, reports, summaries
 - validator: Review, lint, test outputs
+- deerflow: DeerFlow 2.0 SuperAgent — use for COMPLEX tasks that need:
+  * Deep multi-source research with citations
+  * Code execution in a sandboxed environment (filesystem + bash + Python)
+  * Multi-step tasks requiring internal sub-agent coordination
+  * Generating complete slide decks, dashboards, or web pages
+  * Tasks that would take 5+ steps with other agents
 
 ## Rules
 1. Always decompose complex goals into concrete, actionable steps
@@ -63,11 +69,15 @@ You receive a user goal, break it into sub-tasks, assign each to the right speci
 3. Keep plans minimal — prefer fewer steps over more
 4. If a step fails, note the error and adapt the plan
 5. Never repeat a failed step more than once with the same approach
-6. Respond ONLY with valid JSON — no markdown, no explanation outside JSON
+6. Use "deerflow" for complex/deep tasks instead of chaining many steps with other agents
+7. For simple lookups or quick edits, prefer researcher/coder over deerflow
+8. Respond ONLY with valid JSON — no markdown, no explanation outside JSON
 """
 
 _CLASSIFY_PROMPT = """Classify this user goal. Respond with JSON only:
-{{"task_type": "research"|"code"|"browser"|"document"|"multi", "complexity": "simple"|"medium"|"complex", "reasoning": "..."}}
+{{"task_type": "research"|"code"|"browser"|"document"|"deep_research"|"multi", "complexity": "simple"|"medium"|"complex", "reasoning": "..."}}
+
+Use "deep_research" for goals that need comprehensive multi-source research with citations, data analysis, or generating complete reports/presentations.
 
 Goal: {goal}"""
 
@@ -159,12 +169,16 @@ async def classify_node(state: AgentState) -> dict:
         complexity = result.get("complexity", "medium")
 
         # Validate
-        valid_types = {"research", "code", "browser", "document", "multi"}
+        valid_types = {"research", "code", "browser", "document", "deep_research", "multi"}
         valid_complexity = {"simple", "medium", "complex"}
         if task_type not in valid_types:
             task_type = "research"
         if complexity not in valid_complexity:
             complexity = "medium"
+
+        # Auto-escalate to DeerFlow for complex multi-step or deep research tasks
+        if complexity == "complex" and task_type in ("multi", "deep_research"):
+            task_type = "deep_research"  # Will be routed to deerflow agent
 
         await _publish(task_id, "thought",
                        f"Classified as {task_type}/{complexity}: {result.get('reasoning', '')}")
@@ -191,6 +205,29 @@ async def plan_node(state: AgentState) -> dict:
     goal = state["goal"]
 
     await _publish(task_id, "thought", "Generating execution plan...")
+
+    # For deep_research/complex tasks, check if DeerFlow is available and delegate directly
+    if state["task_type"] == "deep_research" and state["complexity"] == "complex":
+        try:
+            from agents.dispatcher import get_available_agents
+            if "deerflow" in get_available_agents():
+                from tools.deerflow_client import get_deerflow_client
+                client = get_deerflow_client()
+                if await client.health_check():
+                    await _publish(task_id, "thought",
+                                   "Complex task detected — delegating to DeerFlow 2.0 SuperAgent")
+                    deerflow_plan = [{
+                        "step": 1,
+                        "agent": "deerflow",
+                        "description": goal,
+                        "status": "pending",
+                    }]
+                    return {"plan": deerflow_plan, "current_step": 0, "status": "execute"}
+                else:
+                    await _publish(task_id, "thought",
+                                   "DeerFlow not available — falling back to standard pipeline")
+        except Exception as e:
+            logger.debug("DeerFlow routing check failed: %s", e)
 
     context_section = ""
     # Inject memory context

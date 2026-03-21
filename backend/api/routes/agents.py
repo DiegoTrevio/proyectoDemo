@@ -21,6 +21,7 @@ CORE_AGENTS = [
     {"name": "browser", "type": "core", "tools": ["navigate", "click", "screenshot", "extract"], "model": "agentOS/workhorse-kimi"},
     {"name": "document_writer", "type": "core", "tools": ["write_doc", "format", "export"], "model": "agentOS/workhorse-qwen"},
     {"name": "validator", "type": "core", "tools": ["lint", "test", "review"], "model": "agentOS/cheap"},
+    {"name": "deerflow", "type": "core", "tools": ["deep_research", "sandbox", "slides", "code_exec", "sub_agents"], "model": "deerflow/superagent"},
 ]
 
 
@@ -58,6 +59,33 @@ async def list_agents(user: AuthUser = Depends(require_auth), db: AsyncSession =
     ]
 
     return core + custom
+
+
+@router.get("/deerflow/status")
+async def deerflow_status(user: AuthUser = Depends(require_auth)):
+    """Check DeerFlow 2.0 service status and available skills."""
+    try:
+        from tools.deerflow_client import get_deerflow_client
+        client = get_deerflow_client()
+        healthy = await client.health_check()
+
+        if not healthy:
+            return {"status": "unavailable", "skills": [], "models": []}
+
+        skills = []
+        models = []
+        try:
+            skills = await client.list_skills()
+        except Exception:
+            pass
+        try:
+            models = await client.list_models()
+        except Exception:
+            pass
+
+        return {"status": "healthy", "skills": skills, "models": models}
+    except Exception as e:
+        return {"status": "error", "detail": str(e), "skills": [], "models": []}
 
 
 @router.post("", response_model=AgentResponse, status_code=201)

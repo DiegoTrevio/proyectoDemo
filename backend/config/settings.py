@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     composio_api_key: str = ""
     steel_api_key: str = ""
 
+    # DeerFlow 2.0
+    deerflow_gateway_url: str = "http://deerflow-gateway:8001"
+    deerflow_langgraph_url: str = "http://deerflow-langgraph:2024"
+    deerflow_enabled: bool = True
+
     # Memory
     mem0_api_key: str = ""
 

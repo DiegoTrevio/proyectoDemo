@@ -69,6 +69,18 @@ def _build_registry() -> dict:
         logger.warning("Failed to load DocumentAgent, using stub: %s", e)
         registry["document_writer"] = _StubAgent("document_writer")
 
+    # Register DeerFlow agent (for complex/deep tasks)
+    try:
+        from config.settings import settings
+        if settings.deerflow_enabled:
+            from agents.deerflow import DeerFlowAgent
+            registry["deerflow"] = DeerFlowAgent()
+            logger.info("DeerFlow agent registered")
+        else:
+            logger.info("DeerFlow disabled in settings — skipping registration")
+    except Exception as e:
+        logger.warning("Failed to load DeerFlowAgent: %s", e)
+
     return registry
 
 

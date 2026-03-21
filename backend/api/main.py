@@ -44,6 +44,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Langfuse keys not configured — tracing disabled")
 
+    # DeerFlow 2.0: check connectivity (non-blocking, service may start later)
+    if settings.deerflow_enabled:
+        try:
+            from tools.deerflow_client import get_deerflow_client
+            client = get_deerflow_client()
+            if await client.health_check():
+                logger.info("DeerFlow 2.0 connected (gateway + langgraph)")
+            else:
+                logger.warning("DeerFlow 2.0 not yet available — will retry on first use")
+        except Exception as e:
+            logger.warning("DeerFlow 2.0 check failed: %s — will retry on first use", e)
+
     yield
 
     # --- Shutdown ---

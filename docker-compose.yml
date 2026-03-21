@@ -258,11 +258,79 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ─── DeerFlow 2.0 — LangGraph Server (Agent Runtime) ───────────────
+  deerflow-langgraph:
+    image: ghcr.io/bytedance/deer-flow:latest
+    ports:
+      - "2024:2024"
+    env_file: .env
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master}
+      - OPENAI_BASE_URL=http://litellm:4000/v1
+    depends_on:
+      litellm:
+        condition: service_healthy
+    volumes:
+      - ./backend/config/deerflow_config.yaml:/app/config.yaml
+      - deerflow-data:/app/.deer-flow
+      - deerflow-workspace:/mnt/user-data
+    networks:
+      - agentOS-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2024/ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+    restart: unless-stopped
+
+  # ─── DeerFlow 2.0 — Gateway API (Skills, Memory, Files) ────────────
+  deerflow-gateway:
+    image: ghcr.io/bytedance/deer-flow-gateway:latest
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment:
+      - LANGGRAPH_URL=http://deerflow-langgraph:2024
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+    depends_on:
+      deerflow-langgraph:
+        condition: service_healthy
+    volumes:
+      - ./backend/config/deerflow_config.yaml:/app/config.yaml
+      - deerflow-data:/app/.deer-flow
+      - deerflow-workspace:/mnt/user-data
+    networks:
+      - agentOS-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:
   neo4j-data:
   neo4j-logs:
+  deerflow-data:
+  deerflow-workspace:
 
 networks:
   agentOS-network:

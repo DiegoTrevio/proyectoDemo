@@ -1,0 +1,89 @@
+# DeerFlow 2.0 configuration for AgentOS integration.
+#
+# This file is mounted into the DeerFlow container as /app/config.yaml.
+# It configures DeerFlow's LLM models, sandbox mode, and tool integrations.
+#
+# DeerFlow routes LLM calls through LiteLLM (AgentOS's existing proxy),
+# so all model API keys are managed centrally via AgentOS's .env file.
+
+# ─── Models ───────────────────────────────────────────────────────────────
+# DeerFlow uses LiteLLM as an OpenAI-compatible gateway.
+# base_url points to AgentOS's LiteLLM service inside the Docker network.
+
+models:
+  # Primary model — used for planning, reasoning, and complex tasks
+  - name: primary
+    display_name: "Claude Sonnet (via LiteLLM)"
+    use: "langchain_openai:ChatOpenAI"
+    model: "agentOS/workhorse"
+    base_url: "http://litellm:4000/v1"
+    api_key: "${LITELLM_MASTER_KEY}"
+    temperature: 0.3
+    max_tokens: 8192
+
+  # Fast model — used for classification, routing, simple tasks
+  - name: fast
+    display_name: "Gemini Flash (via LiteLLM)"
+    model: "agentOS/workhorse-gemini"
+    use: "langchain_openai:ChatOpenAI"
+    base_url: "http://litellm:4000/v1"
+    api_key: "${LITELLM_MASTER_KEY}"
+    temperature: 0.2
+    max_tokens: 4096
+
+  # Cheap model — used for summarization, extraction
+  - name: cheap
+    display_name: "Gemini Flash Lite (via LiteLLM)"
+    model: "agentOS/cheap"
+    use: "langchain_openai:ChatOpenAI"
+    base_url: "http://litellm:4000/v1"
+    api_key: "${LITELLM_MASTER_KEY}"
+    temperature: 0.1
+    max_tokens: 2048
+
+# ─── Sandbox ──────────────────────────────────────────────────────────────
+# DeerFlow's sandbox provides agents with a real filesystem, bash, and Python.
+# Using Docker mode for production (local mode available for development).
+
+sandbox:
+  use: "docker"
+  # Image for sandbox containers (DeerFlow's default sandbox image)
+  image: "deerflow/sandbox:latest"
+  # Timeout for sandbox operations (seconds)
+  timeout: 300
+  # Maximum number of concurrent sandboxes
+  max_concurrent: 5
+
+# ─── Tools ────────────────────────────────────────────────────────────────
+# DeerFlow auto-loads: bash, ls, read_file, write_file, str_replace, view_image
+# Additional tools configured here or via MCP servers.
+
+tools:
+  # Web search via Tavily (uses AgentOS's key)
+  - name: web_search
+    provider: tavily
+    api_key: "${TAVILY_API_KEY}"
+
+# ─── MCP Servers (Extensions) ────────────────────────────────────────────
+# DeerFlow supports MCP (Model Context Protocol) servers for extensibility.
+# These are defined in extensions_config.json and loaded at runtime.
+
+mcp: {}
+
+# ─── Memory ──────────────────────────────────────────────────────────────
+# DeerFlow's persistent memory system.
+# Stores user profiles, preferences, and accumulated knowledge.
+
+memory:
+  enabled: true
+  # Memory is stored in a JSON file inside the DeerFlow container volume
+  # path: /app/.deer-flow/memory.json (default, mapped via volume)
+
+# ─── Rate Limits ──────────────────────────────────────────────────────────
+# Prevent runaway agent loops.
+
+limits:
+  max_iterations: 25
+  max_subagents: 5
+  max_tokens_per_task: 500000
+  timeout_seconds: 600
