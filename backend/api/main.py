@@ -1,6 +1,7 @@
 """AgentOS — FastAPI application entry point."""
 
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 
@@ -22,20 +23,48 @@ setup_logging()
 logger = logging.getLogger("agentos")
 
 
+def _validate_environment() -> list[str]:
+    """Validate required environment variables at startup. Returns list of warnings."""
+    warnings = []
+
+    # Critical: database must be configured
+    if "localhost" in settings.database_url or "postgres:5432" in settings.database_url:
+        if os.environ.get("TESTING") != "1":
+            warnings.append("DATABASE_URL uses default/docker host — ensure this is correct for your environment")
+
+    # Security: API key salt should be changed from default
+    if settings.api_key_salt == "secureagent-key-salt-v1":
+        warnings.append("API_KEY_SALT is using the default value — change this in production!")
+
+    # Security: CORS origins should be explicit in production
+    if settings.cors_origins == "http://localhost:3000":
+        warnings.append("CORS_ORIGINS is set to localhost — update for production domains")
+
+    return warnings
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle: connect to Redis, PostgreSQL, Langfuse."""
     # --- Startup ---
+    # Environment validation
+    env_warnings = _validate_environment()
+    for warning in env_warnings:
+        logger.warning("ENV: %s", warning)
+
     # PostgreSQL: create tables if they don't exist
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("PostgreSQL connected — tables ensured")
 
     # Redis: verify connectivity
-    r = aioredis.from_url(settings.redis_url)
-    await r.ping()
-    await r.close()
-    logger.info("Redis connected")
+    try:
+        r = aioredis.from_url(settings.redis_url, socket_connect_timeout=5)
+        await r.ping()
+        await r.close()
+        logger.info("Redis connected")
+    except Exception as e:
+        logger.warning("Redis not available: %s — rate limiting and streaming will be degraded", e)
 
     # Langfuse
     lf = init_langfuse()
@@ -56,10 +85,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("DeerFlow 2.0 check failed: %s — will retry on first use", e)
 
+    logger.info("AgentOS v0.1.0 started (%d env warnings)", len(env_warnings))
+
     yield
 
     # --- Shutdown ---
     await engine.dispose()
+    logger.info("AgentOS shutdown complete")
 
 
 app = FastAPI(

@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# ── Stage 1: Dependencies ────────────────────────────────────────────────
+FROM python:3.12-slim AS deps
 
 WORKDIR /app
 
@@ -6,11 +7,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for production security
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Install SDK
+COPY sdk/ /sdk/
+RUN pip install --no-cache-dir /sdk
+
+# ── Stage 2: Production ─────────────────────────────────────────────────
+FROM python:3.12-slim AS production
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
 RUN groupadd -r agentos && useradd -r -g agentos -d /app -s /sbin/nologin agentos
 
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy installed packages from deps stage
+COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/local/bin /usr/local/bin
 
 COPY backend/ .
 
@@ -18,10 +36,18 @@ RUN chown -R agentos:agentos /app
 
 USER agentos
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Gunicorn with uvicorn workers for production (2 workers per CPU core)
+CMD ["gunicorn", "api.main:app", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "4", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--keep-alive", "5", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-"]
