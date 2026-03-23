@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     hermes_model: str = "anthropic/claude-sonnet-4"
     hermes_timeout: int = 300
 
-    # Memory
+    # Memory — Supermemory (primary L1) + Mem0 (fallback)
+    supermemory_api_key: str = ""
     mem0_api_key: str = ""
 
     # Database
