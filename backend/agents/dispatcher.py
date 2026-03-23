@@ -81,6 +81,18 @@ def _build_registry() -> dict:
     except Exception as e:
         logger.warning("Failed to load DeerFlowAgent: %s", e)
 
+    # Register Hermes agent (Nous Research — multi-tool CLI agent)
+    try:
+        from config.settings import settings
+        if settings.hermes_enabled:
+            from agents.hermes import HermesAgent
+            registry["hermes"] = HermesAgent()
+            logger.info("Hermes agent registered")
+        else:
+            logger.info("Hermes disabled in settings — skipping registration")
+    except Exception as e:
+        logger.warning("Failed to load HermesAgent: %s", e)
+
     return registry
 
 

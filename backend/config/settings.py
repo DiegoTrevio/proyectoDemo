@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     deerflow_langgraph_url: str = "http://deerflow-langgraph:2024"
     deerflow_enabled: bool = True
 
+    # Hermes Agent (Nous Research)
+    hermes_enabled: bool = False
+    hermes_cli_path: str = "hermes"
+    hermes_model: str = "anthropic/claude-sonnet-4"
+    hermes_timeout: int = 300
+
     # Memory
     mem0_api_key: str = ""
 
