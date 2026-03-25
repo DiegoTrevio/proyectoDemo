@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.middleware.auth import AuthUser, require_auth
 from api.schemas import BillingEstimate, UsageResponse
 from config.model_router import select_model
 from db.database import get_db
@@ -30,6 +31,7 @@ _PRICING: dict[str, float] = {
 async def estimate_cost(
     goal: str = Query(..., min_length=1),
     model: str | None = Query(None),
+    user: AuthUser = Depends(require_auth),
 ):
     """Estimate cost BEFORE executing a task."""
     if model:
@@ -55,7 +57,10 @@ async def estimate_cost(
 
 
 @router.get("/usage", response_model=UsageResponse)
-async def get_usage(db: AsyncSession = Depends(get_db)):
+async def get_usage(
+    user: AuthUser = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """Get aggregated usage for the current user."""
     totals = await db.execute(
         select(

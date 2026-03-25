@@ -31,6 +31,26 @@ export function clearApiKey() {
   }
 }
 
+/** Check if user has an active SuperTokens session. */
+export async function hasSession(): Promise<boolean> {
+  try {
+    const Session = await import("supertokens-auth-react/recipe/session");
+    return await Session.doesSessionExist();
+  } catch {
+    return false;
+  }
+}
+
+/** Sign out from SuperTokens session. */
+export async function signOut(): Promise<void> {
+  try {
+    const Session = await import("supertokens-auth-react/recipe/session");
+    await Session.signOut();
+  } catch {
+    // SuperTokens not available
+  }
+}
+
 function _authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   if (_apiKey) {
@@ -108,6 +128,7 @@ export interface CreateTaskPayload {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
+    credentials: "include", // Send SuperTokens session cookies automatically
     headers: {
       "Content-Type": "application/json",
       ..._authHeaders(),
@@ -178,7 +199,7 @@ export function subscribeToTask(
   onError?: (error: Error) => void,
 ): () => void {
   const url = `${API_BASE}/tasks/${taskId}/stream`;
-  const eventSource = new EventSource(url);
+  const eventSource = new EventSource(url, { withCredentials: true });
 
   eventSource.onmessage = (e) => {
     try {

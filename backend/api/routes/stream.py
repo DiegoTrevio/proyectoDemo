@@ -4,9 +4,10 @@ import asyncio
 import json
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
+from api.middleware.auth import AuthUser, optional_auth
 from config.settings import settings
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["stream"])
@@ -46,7 +47,11 @@ async def _event_generator(task_id: str, request: Request, last_event_id: str | 
 
 
 @router.get("/{task_id}/stream")
-async def stream_task(task_id: str, request: Request):
+async def stream_task(
+    task_id: str,
+    request: Request,
+    user: AuthUser | None = Depends(optional_auth),
+):
     """SSE endpoint for real-time task updates.
 
     Supports reconnection via the Last-Event-ID header.

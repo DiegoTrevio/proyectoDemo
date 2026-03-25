@@ -13,7 +13,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { TaskInput } from "@/components/TaskInput";
-import { createTask, listTasks, loadApiKey, setApiKey, clearApiKey, ApiError, type Task } from "@/lib/api";
+import { createTask, listTasks, loadApiKey, setApiKey, clearApiKey, hasSession, signOut, ApiError, type Task } from "@/lib/api";
 
 const STATUS_CONFIG: Record<
   string,
@@ -25,24 +25,6 @@ const STATUS_CONFIG: Record<
   failed: { icon: XCircle, color: "text-accent-red", bg: "bg-accent-red/10", label: "Failed" },
   cancelled: { icon: XCircle, color: "text-text-tertiary", bg: "bg-bg-hover", label: "Cancelled" },
 };
-
-async function hasSession(): Promise<boolean> {
-  try {
-    const Session = await import("supertokens-auth-react/recipe/session");
-    return await Session.doesSessionExist();
-  } catch {
-    return false;
-  }
-}
-
-async function signOut(): Promise<void> {
-  try {
-    const Session = await import("supertokens-auth-react/recipe/session");
-    await Session.signOut();
-  } catch {
-    // SuperTokens not available
-  }
-}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -155,14 +137,30 @@ export default function Dashboard() {
       <div className="max-w-md mx-auto px-6 py-24">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold tracking-tight mb-2">Welcome to AgentOS</h1>
-          <p className="text-[13px] text-text-secondary">Enter your API key to get started.</p>
+          <p className="text-[13px] text-text-secondary">Sign in to get started.</p>
         </div>
         {error && (
           <div className="mb-4 px-4 py-3 rounded-lg bg-accent-red/10 border border-accent-red/20 text-[13px] text-accent-red">
             {error}
           </div>
         )}
-        <div className="space-y-3">
+        <div className="space-y-4">
+          {/* SuperTokens login */}
+          <a
+            href="/auth"
+            className="block w-full px-4 py-3 rounded-xl bg-accent-blue text-white text-[13px] font-medium text-center hover:bg-accent-blue/90 transition-colors"
+          >
+            Sign in with Email
+          </a>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-[11px] text-text-tertiary uppercase tracking-wider">or use API key</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+
+          {/* API key fallback */}
           <input
             type="password"
             value={apiKeyInput}
@@ -174,9 +172,9 @@ export default function Dashboard() {
           <button
             onClick={handleLogin}
             disabled={!apiKeyInput.trim()}
-            className="w-full px-4 py-3 rounded-xl bg-accent-blue text-white text-[13px] font-medium hover:bg-accent-blue/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-4 py-3 rounded-xl border border-border bg-bg-card text-[13px] font-medium text-text-secondary hover:bg-bg-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Connect
+            Connect with API Key
           </button>
         </div>
       </div>
