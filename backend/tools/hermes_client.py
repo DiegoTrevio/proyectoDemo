@@ -1,18 +1,21 @@
-"""Hermes Agent CLI client — spawns Hermes in single-query mode and parses output.
+"""Hermes Agent client — supports both HTTP API (v0.4.0+) and CLI subprocess modes.
 
 Hermes Agent (by Nous Research) provides:
   - 30+ native tools (terminal, file ops, web, git, browser, vision)
   - 80+ loadable skills
   - Persistent memory across sessions
   - Multi-provider LLM support (Anthropic, OpenAI, OpenRouter, Google)
+  - OpenAI-compatible API server (/v1/chat/completions) — new in v0.4.0
 
-This client wraps the Hermes CLI (`hermes chat -q <prompt>`) as an async subprocess,
-captures stdout/stderr, and parses structured output (session ID, tokens, cost).
+This client supports two execution modes:
+  1. HTTP API (preferred) — calls Hermes's OpenAI-compatible API server
+  2. CLI subprocess (fallback) — spawns `hermes chat -q <prompt>`
 
 Ported from the TypeScript adapter: github.com/NousResearch/hermes-paperclip-adapter
 """
 
 import asyncio
+import json
 import logging
 import re
 import shutil
@@ -38,7 +41,7 @@ GRACE_PERIOD = 10  # seconds to wait after timeout before killing
 
 @dataclass
 class HermesResult:
-    """Result from a Hermes CLI execution."""
+    """Result from a Hermes execution (HTTP or CLI)."""
     success: bool
     output: str
     session_id: str | None = None
@@ -48,10 +51,11 @@ class HermesResult:
     exit_code: int | None = None
     errors: list[str] = field(default_factory=list)
     timed_out: bool = False
+    mode: str = "cli"  # "http" or "cli"
 
 
 class HermesClient:
-    """Async client that spawns Hermes CLI as a subprocess.
+    """Async client for Hermes Agent — HTTP API (v0.4.0+) with CLI fallback.
 
     Usage:
         client = HermesClient()
@@ -68,6 +72,7 @@ class HermesClient:
         max_iterations: int = 50,
         persist_session: bool = True,
         enabled_toolsets: list[str] | None = None,
+        api_url: str | None = None,
     ):
         self.cli_path = cli_path or settings.hermes_cli_path
         self.model = model or settings.hermes_model
@@ -75,8 +80,36 @@ class HermesClient:
         self.max_iterations = max_iterations
         self.persist_session = persist_session
         self.enabled_toolsets = enabled_toolsets
+        self.api_url = api_url or getattr(settings, "hermes_api_url", "")
+
+    @property
+    def _use_http(self) -> bool:
+        """Whether to use HTTP API mode (preferred over CLI)."""
+        return bool(self.api_url)
 
     async def is_available(self) -> bool:
+        """Check if Hermes is accessible (via HTTP API or CLI)."""
+        if self._use_http:
+            return await self._http_health_check()
+        return await self._cli_is_available()
+
+    async def _http_health_check(self) -> bool:
+        """Check if Hermes API server is reachable."""
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{self.api_url}/health")
+                if resp.status_code == 200:
+                    logger.debug("Hermes API server healthy at %s", self.api_url)
+                    return True
+                # Some versions use /v1/models as health indicator
+                resp = await client.get(f"{self.api_url}/v1/models")
+                return resp.status_code == 200
+        except Exception as e:
+            logger.debug("Hermes API health check failed: %s", e)
+            return False
+
+    async def _cli_is_available(self) -> bool:
         """Check if the Hermes CLI is installed and accessible."""
         path = shutil.which(self.cli_path)
         if not path:
@@ -95,6 +128,209 @@ class HermesClient:
         except Exception as e:
             logger.debug("Hermes CLI version check failed: %s", e)
             return False
+
+    async def run(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        extra_env: dict[str, str] | None = None,
+        context: str = "",
+        toolsets: list[str] | None = None,
+    ) -> HermesResult:
+        """Execute a task via Hermes (HTTP API or CLI fallback).
+
+        Args:
+            prompt: The task/query to send to Hermes.
+            session_id: Optional session ID to resume a previous session.
+            extra_env: Additional environment variables (CLI mode only).
+            context: Optional context to prepend to the prompt.
+            toolsets: Optional toolsets to enable for this execution.
+
+        Returns:
+            HermesResult with parsed output, tokens, cost, and session info.
+        """
+        if self._use_http:
+            return await self._run_http(prompt, session_id, context, toolsets)
+        return await self._run_cli(prompt, session_id, extra_env, context)
+
+    # ── HTTP API mode (v0.4.0+) ────────────────────────────────────────────
+
+    async def _run_http(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        context: str = "",
+        toolsets: list[str] | None = None,
+    ) -> HermesResult:
+        """Execute via Hermes's OpenAI-compatible API server."""
+        import httpx
+
+        full_prompt = f"{context}\n\n{prompt}" if context else prompt
+
+        messages = []
+        if context:
+            messages.append({"role": "system", "content": context})
+        messages.append({"role": "user", "content": prompt if context else full_prompt})
+
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": 8192,
+        }
+
+        # Pass toolsets and session via extra_body (Hermes extension)
+        extra: dict = {}
+        if toolsets:
+            extra["toolsets"] = toolsets
+        if session_id and self.persist_session:
+            extra["session_id"] = session_id
+        if self.max_iterations:
+            extra["max_iterations"] = self.max_iterations
+        if extra:
+            payload["extra_body"] = extra
+
+        logger.info(
+            "Hermes HTTP executing: model=%s url=%s prompt=%s",
+            self.model, self.api_url, prompt[:80],
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.api_url}/v1/chat/completions",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+
+                if resp.status_code != 200:
+                    error_text = resp.text
+                    logger.warning("Hermes API error %d: %s", resp.status_code, error_text[:200])
+                    return HermesResult(
+                        success=False,
+                        output="",
+                        errors=[f"Hermes API returned {resp.status_code}: {error_text[:500]}"],
+                        mode="http",
+                    )
+
+                data = resp.json()
+                return self._parse_http_response(data)
+
+        except httpx.TimeoutException:
+            logger.warning("Hermes HTTP timed out after %ds", self.timeout)
+            return HermesResult(
+                success=False,
+                output="",
+                errors=[f"Hermes API timed out after {self.timeout}s"],
+                timed_out=True,
+                mode="http",
+            )
+        except Exception as e:
+            logger.warning("Hermes HTTP request failed: %s", e)
+            return HermesResult(
+                success=False,
+                output="",
+                errors=[f"Hermes API request failed: {e}"],
+                mode="http",
+            )
+
+    def _parse_http_response(self, data: dict) -> HermesResult:
+        """Parse OpenAI-compatible response from Hermes API."""
+        choices = data.get("choices", [])
+        output = ""
+        if choices:
+            message = choices[0].get("message", {})
+            output = message.get("content", "")
+
+        usage = data.get("usage", {})
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+
+        # Hermes may include cost in usage extension
+        cost = usage.get("cost", 0.0)
+
+        # Session ID from Hermes extension
+        session_id = data.get("session_id") or data.get("id")
+
+        logger.info(
+            "Hermes HTTP completed: tokens=%d+%d cost=$%.4f session=%s",
+            input_tokens, output_tokens, cost, session_id or "none",
+        )
+
+        return HermesResult(
+            success=True,
+            output=output,
+            session_id=session_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost,
+            exit_code=0,
+            mode="http",
+        )
+
+    # ── CLI subprocess mode (legacy) ───────────────────────────────────────
+
+    async def _run_cli(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        extra_env: dict[str, str] | None = None,
+        context: str = "",
+    ) -> HermesResult:
+        """Execute a task via the Hermes CLI subprocess."""
+        full_prompt = f"{context}\n\n{prompt}" if context else prompt
+        args = self._build_args(full_prompt, session_id)
+        env = self._build_env(extra_env)
+
+        logger.info(
+            "Hermes CLI executing: model=%s timeout=%ds prompt=%s",
+            self.model, self.timeout, prompt[:80],
+        )
+
+        timed_out = False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.timeout,
+                )
+            except asyncio.TimeoutError:
+                timed_out = True
+                logger.warning("Hermes timed out after %ds, sending SIGTERM", self.timeout)
+                proc.terminate()
+                try:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        proc.communicate(), timeout=GRACE_PERIOD,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Hermes did not exit after grace period, killing")
+                    proc.kill()
+                    stdout_bytes, stderr_bytes = await proc.communicate()
+
+        except FileNotFoundError:
+            return HermesResult(
+                success=False,
+                output="",
+                errors=[f"Hermes CLI not found: {self.cli_path}"],
+                mode="cli",
+            )
+        except Exception as e:
+            return HermesResult(
+                success=False,
+                output="",
+                errors=[f"Failed to spawn Hermes: {e}"],
+                mode="cli",
+            )
+
+        stdout = stdout_bytes.decode(errors="replace")
+        stderr = stderr_bytes.decode(errors="replace")
+
+        return self._parse_output(stdout, stderr, proc.returncode, timed_out)
 
     def _build_args(self, prompt: str, session_id: str | None = None) -> list[str]:
         """Build CLI arguments for a Hermes invocation."""
@@ -137,77 +373,6 @@ class HermesClient:
             env.update(extra_env)
 
         return env
-
-    async def run(
-        self,
-        prompt: str,
-        session_id: str | None = None,
-        extra_env: dict[str, str] | None = None,
-        context: str = "",
-    ) -> HermesResult:
-        """Execute a task via the Hermes CLI.
-
-        Args:
-            prompt: The task/query to send to Hermes.
-            session_id: Optional session ID to resume a previous session.
-            extra_env: Additional environment variables for the subprocess.
-            context: Optional context to prepend to the prompt.
-
-        Returns:
-            HermesResult with parsed output, tokens, cost, and session info.
-        """
-        full_prompt = f"{context}\n\n{prompt}" if context else prompt
-        args = self._build_args(full_prompt, session_id)
-        env = self._build_env(extra_env)
-
-        logger.info(
-            "Hermes executing: model=%s timeout=%ds prompt=%s",
-            self.model, self.timeout, prompt[:80],
-        )
-
-        timed_out = False
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=self.timeout,
-                )
-            except asyncio.TimeoutError:
-                timed_out = True
-                logger.warning("Hermes timed out after %ds, sending SIGTERM", self.timeout)
-                proc.terminate()
-                try:
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                        proc.communicate(), timeout=GRACE_PERIOD,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Hermes did not exit after grace period, killing")
-                    proc.kill()
-                    stdout_bytes, stderr_bytes = await proc.communicate()
-
-        except FileNotFoundError:
-            return HermesResult(
-                success=False,
-                output="",
-                errors=[f"Hermes CLI not found: {self.cli_path}"],
-            )
-        except Exception as e:
-            return HermesResult(
-                success=False,
-                output="",
-                errors=[f"Failed to spawn Hermes: {e}"],
-            )
-
-        stdout = stdout_bytes.decode(errors="replace")
-        stderr = stderr_bytes.decode(errors="replace")
-
-        return self._parse_output(stdout, stderr, proc.returncode, timed_out)
 
     def _parse_output(
         self,
@@ -269,7 +434,7 @@ class HermesClient:
             errors.append(f"Process timed out after {self.timeout}s")
 
         logger.info(
-            "Hermes completed: exit=%s tokens=%d+%d cost=$%.4f session=%s",
+            "Hermes CLI completed: exit=%s tokens=%d+%d cost=$%.4f session=%s",
             exit_code, input_tokens, output_tokens, cost, session_id or "none",
         )
 
@@ -283,6 +448,7 @@ class HermesClient:
             exit_code=exit_code,
             errors=errors,
             timed_out=timed_out,
+            mode="cli",
         )
 
 

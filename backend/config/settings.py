@@ -26,11 +26,13 @@ class Settings(BaseSettings):
     deerflow_langgraph_url: str = "http://deerflow-langgraph:2024"
     deerflow_enabled: bool = True
 
-    # Hermes Agent (Nous Research)
+    # Hermes Agent (Nous Research) — v0.4.0+
     hermes_enabled: bool = False
-    hermes_cli_path: str = "hermes"
+    hermes_api_url: str = ""  # HTTP API mode (preferred): e.g. http://hermes:3000
+    hermes_cli_path: str = "hermes"  # CLI fallback when api_url is empty
     hermes_model: str = "anthropic/claude-sonnet-4"
     hermes_timeout: int = 300
+    hermes_paperclip_enabled: bool = False  # Enable Paperclip adapter bridge
 
     # Memory — Supermemory (primary L1) + Mem0 (fallback)
     supermemory_api_key: str = ""

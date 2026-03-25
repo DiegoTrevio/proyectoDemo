@@ -1,13 +1,14 @@
-"""Hermes Agent — delegates tasks to Nous Research's Hermes Agent CLI.
+"""Hermes Agent — delegates tasks to Nous Research's Hermes Agent (v0.4.0+).
 
 Hermes excels at:
   - Complex multi-tool tasks (30+ native tools: terminal, files, web, git, browser, vision)
   - Tasks requiring persistent memory across sessions
-  - Specialized skills (80+ loadable skills)
+  - Specialized skills (80+ loadable skills, including OCR, Huggingface, OSINT)
   - Multi-step autonomous execution with session resumption
+  - OpenAI-compatible API server for structured HTTP communication
 
 The Hermes agent acts as a bridge: it receives tasks from AgentOS's orchestrator
-and delegates them to the Hermes CLI in single-query mode, parsing structured output.
+and delegates them to Hermes via HTTP API (preferred) or CLI subprocess (fallback).
 
 Ported from: github.com/NousResearch/hermes-paperclip-adapter
 """
@@ -16,7 +17,9 @@ import logging
 
 from agents.base_agent import AbstractAgent, AgentResult
 from agents.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from config.settings import settings
 from tools.hermes_client import HermesClient, get_hermes_client
+from tools.hermes_paperclip import PaperclipBridge, get_paperclip_bridge
 
 logger = logging.getLogger("agentos.agents.hermes")
 
@@ -31,11 +34,11 @@ _TOOLSET_MAP = {
 
 
 class HermesAgent(AbstractAgent):
-    """Bridges AgentOS orchestrator to Hermes Agent CLI.
+    """Bridges AgentOS orchestrator to Hermes Agent (HTTP API or CLI).
 
-    For tasks that benefit from Hermes's native tool suite (terminal, git,
-    browser, vision, etc.), this agent spawns Hermes as a subprocess and
-    captures its output.
+    Supports two modes (auto-detected):
+      1. HTTP API (v0.4.0+) — calls /v1/chat/completions endpoint
+      2. CLI subprocess — spawns `hermes chat -q <prompt>`
     """
 
     name = "hermes"
@@ -46,6 +49,7 @@ class HermesAgent(AbstractAgent):
         self,
         client: HermesClient | None = None,
         circuit_breaker: CircuitBreaker | None = None,
+        paperclip_bridge: PaperclipBridge | None = None,
     ):
         cb_config = CircuitBreakerConfig(
             max_iterations=1,  # Hermes handles its own iterations internally
@@ -54,6 +58,7 @@ class HermesAgent(AbstractAgent):
         )
         super().__init__(circuit_breaker or CircuitBreaker(cb_config))
         self._client = client
+        self._paperclip = paperclip_bridge
 
     @property
     def client(self) -> HermesClient:
@@ -61,15 +66,25 @@ class HermesAgent(AbstractAgent):
             self._client = get_hermes_client()
         return self._client
 
+    @property
+    def paperclip(self) -> PaperclipBridge:
+        if self._paperclip is None:
+            self._paperclip = get_paperclip_bridge()
+        return self._paperclip
+
+    @property
+    def use_paperclip(self) -> bool:
+        return settings.hermes_paperclip_enabled
+
     async def is_available(self) -> bool:
-        """Check if the Hermes CLI is installed and accessible."""
+        """Check if Hermes is accessible (HTTP API or CLI)."""
         try:
             return await self.client.is_available()
         except Exception:
             return False
 
     async def execute(self, task: dict, context: dict) -> AgentResult:
-        """Execute a task via Hermes Agent CLI.
+        """Execute a task via Hermes Agent.
 
         Args:
             task: Dict with {goal, task_id, step_index, task_type?}
@@ -85,11 +100,14 @@ class HermesAgent(AbstractAgent):
         # Check availability
         available = await self.is_available()
         if not available:
-            logger.warning("Hermes CLI not available, cannot execute task")
+            logger.warning("Hermes not available, cannot execute task")
             return AgentResult(
                 success=False,
                 output="",
-                error="Hermes Agent CLI is not installed. Install with: pip install hermes-agent",
+                error=(
+                    "Hermes Agent is not available. "
+                    "Set HERMES_API_URL for HTTP mode or install CLI: pip install hermes-agent"
+                ),
             )
 
         # Build context from prior results
@@ -109,27 +127,37 @@ class HermesAgent(AbstractAgent):
         # Select toolsets based on task type
         toolsets = _TOOLSET_MAP.get(task_type)
 
+        mode = "paperclip" if self.use_paperclip else ("http" if self.client._use_http else "cli")
         logger.info(
-            "Hermes executing: task_id=%s type=%s goal=%s",
-            task_id, task_type or "auto", goal[:80],
+            "Hermes executing: task_id=%s type=%s mode=%s goal=%s",
+            task_id, task_type or "auto", mode, goal[:80],
         )
 
-        # Execute via Hermes CLI
-        result = await self.client.run(
-            prompt=goal,
-            context=context_str,
-        )
+        # Execute via Paperclip adapter or direct Hermes
+        if self.use_paperclip:
+            result = await self.paperclip.assign_task(
+                task_id=task_id,
+                title=goal[:120],
+                body=f"{context_str}\n\n{goal}" if context_str else goal,
+                toolsets=toolsets,
+            )
+        else:
+            result = await self.client.run(
+                prompt=goal,
+                context=context_str,
+                toolsets=toolsets,
+            )
 
         if result.success:
             logger.info(
-                "Hermes completed: task_id=%s tokens=%d+%d cost=$%.4f",
-                task_id, result.input_tokens, result.output_tokens, result.cost,
+                "Hermes completed: task_id=%s mode=%s tokens=%d+%d cost=$%.4f",
+                task_id, result.mode, result.input_tokens, result.output_tokens, result.cost,
             )
         else:
             error_summary = "; ".join(result.errors) if result.errors else "Unknown error"
             logger.warning(
-                "Hermes failed: task_id=%s exit=%s errors=%s",
-                task_id, result.exit_code, error_summary,
+                "Hermes failed: task_id=%s mode=%s exit=%s errors=%s",
+                task_id, result.mode, result.exit_code, error_summary,
             )
 
         return AgentResult(

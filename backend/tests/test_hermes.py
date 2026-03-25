@@ -1,10 +1,9 @@
-"""Tests for Hermes Agent integration — client, agent, and dispatcher registration."""
+"""Tests for Hermes Agent integration — client (HTTP + CLI), Paperclip bridge, and dispatcher."""
 
 import os
 
 os.environ["TESTING"] = "1"
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,7 +11,7 @@ import pytest
 from tools.hermes_client import HermesClient, HermesResult, _SESSION_ID_RE, _INPUT_TOKENS_RE
 
 
-# ─── HermesClient output parsing ─────────────────────────────────────────────
+# ─── HermesClient output parsing (CLI mode) ──────────────────────────────────
 
 
 class TestHermesOutputParsing:
@@ -43,6 +42,7 @@ class TestHermesOutputParsing:
         assert result.output_tokens == 50
         assert result.cost == 0.0035
         assert result.errors == []
+        assert result.mode == "cli"
 
     def test_parse_failed_output(self):
         client = self._client()
@@ -84,6 +84,57 @@ class TestHermesOutputParsing:
         stderr = "\n".join(f"Error: problem {i}" for i in range(10))
         result = client._parse_output("", stderr, exit_code=1, timed_out=False)
         assert len(result.errors) == 5
+
+
+# ─── HermesClient HTTP API mode ─────────────────────────────────────────────
+
+
+class TestHermesHTTPMode:
+    """Test HTTP API mode (v0.4.0+)."""
+
+    def test_use_http_when_api_url_set(self):
+        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, api_url="http://hermes:3000")
+        assert client._use_http is True
+
+    def test_use_cli_when_no_api_url(self):
+        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, api_url="")
+        assert client._use_http is False
+
+    def test_parse_http_response(self):
+        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, api_url="http://hermes:3000")
+        data = {
+            "id": "chatcmpl-abc123",
+            "choices": [{"message": {"role": "assistant", "content": "Hello from Hermes!"}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "cost": 0.005,
+            },
+            "session_id": "sess-http-001",
+        }
+        result = client._parse_http_response(data)
+
+        assert result.success is True
+        assert result.output == "Hello from Hermes!"
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+        assert result.cost == 0.005
+        assert result.session_id == "sess-http-001"
+        assert result.mode == "http"
+
+    def test_parse_http_response_minimal(self):
+        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, api_url="http://hermes:3000")
+        data = {
+            "id": "chatcmpl-xyz",
+            "choices": [{"message": {"content": "Done"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        result = client._parse_http_response(data)
+
+        assert result.success is True
+        assert result.output == "Done"
+        assert result.cost == 0.0
+        assert result.session_id == "chatcmpl-xyz"  # Falls back to response id
 
 
 # ─── HermesClient CLI interaction ────────────────────────────────────────────
@@ -155,7 +206,7 @@ class TestHermesAgent:
         result = await agent.execute({"goal": "test task"}, {})
 
         assert result.success is False
-        assert "not installed" in result.error.lower()
+        assert "not available" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_execute_success(self):
@@ -163,6 +214,7 @@ class TestHermesAgent:
 
         mock_client = MagicMock()
         mock_client.is_available = AsyncMock(return_value=True)
+        mock_client._use_http = False
         mock_client.run = AsyncMock(return_value=HermesResult(
             success=True,
             output="Task completed successfully",
@@ -190,6 +242,7 @@ class TestHermesAgent:
 
         mock_client = MagicMock()
         mock_client.is_available = AsyncMock(return_value=True)
+        mock_client._use_http = False
         mock_client.run = AsyncMock(return_value=HermesResult(
             success=True, output="Done",
         ))
@@ -207,6 +260,54 @@ class TestHermesAgent:
 
         call_kwargs = mock_client.run.call_args
         assert "Remember this context" in call_kwargs.kwargs.get("context", "")
+
+
+# ─── Paperclip adapter bridge ───────────────────────────────────────────────
+
+
+class TestPaperclipBridge:
+    """Test Paperclip adapter template rendering and task assignment."""
+
+    def test_render_template_simple(self):
+        from tools.hermes_paperclip import render_template
+        template = "Hello {{agentName}}, work on {{taskTitle}}"
+        result = render_template(template, {"agentName": "Hermes", "taskTitle": "Research AI"})
+        assert result == "Hello Hermes, work on Research AI"
+
+    def test_render_template_conditional_present(self):
+        from tools.hermes_paperclip import render_template
+        template = "{{#taskId}}Task: {{taskId}}{{/taskId}}{{#noTask}}No task assigned{{/noTask}}"
+        result = render_template(template, {"taskId": "t-001"})
+        assert "Task: t-001" in result
+        assert "No task assigned" not in result
+
+    def test_render_template_conditional_absent(self):
+        from tools.hermes_paperclip import render_template
+        template = "{{#taskId}}Task: {{taskId}}{{/taskId}}{{#noTask}}No task assigned{{/noTask}}"
+        result = render_template(template, {})
+        assert "No task assigned" in result
+        assert "Task:" not in result
+
+    @pytest.mark.asyncio
+    async def test_assign_task(self):
+        from tools.hermes_paperclip import PaperclipBridge
+
+        mock_client = MagicMock()
+        mock_client.run = AsyncMock(return_value=HermesResult(
+            success=True, output="Task completed via Paperclip",
+        ))
+
+        bridge = PaperclipBridge(client=mock_client)
+        result = await bridge.assign_task(
+            task_id="t-001",
+            title="Research AI safety",
+            body="Find latest papers on AI alignment.",
+        )
+
+        assert result.success is True
+        mock_client.run.assert_called_once()
+        call_kwargs = mock_client.run.call_args
+        assert "Research AI safety" in call_kwargs.kwargs.get("prompt", call_kwargs.args[0] if call_kwargs.args else "")
 
 
 # ─── Dispatcher registration ────────────────────────────────────────────────
