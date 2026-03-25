@@ -4,6 +4,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
@@ -85,11 +86,49 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("DeerFlow 2.0 check failed: %s — will retry on first use", e)
 
+    # arq: create connection pool for task enqueueing
+    try:
+        from arq import create_pool
+        from workers.task_worker import WorkerSettings
+        app.state.arq_pool = await create_pool(WorkerSettings.redis_settings)
+        logger.info("arq pool connected (queue: %s)", WorkerSettings.queue_name)
+    except Exception as e:
+        app.state.arq_pool = None
+        logger.warning("arq pool not available: %s — tasks will run inline (dev mode)", e)
+
+    # Recovery: re-enqueue tasks that were stuck as "running" (server crash recovery)
+    try:
+        from sqlalchemy import select as sa_select
+        from db.models import Task
+        async with engine.begin() as conn:
+            from sqlalchemy.ext.asyncio import AsyncSession
+            async with AsyncSession(engine) as db:
+                result = await db.execute(
+                    sa_select(Task).where(Task.status == "running")
+                )
+                stuck_tasks = result.scalars().all()
+                if stuck_tasks:
+                    logger.warning("Found %d stuck tasks from previous crash — re-enqueueing", len(stuck_tasks))
+                    for task in stuck_tasks:
+                        task.status = "queued"
+                        task.updated_at = datetime.now(timezone.utc)
+                        if app.state.arq_pool:
+                            await app.state.arq_pool.enqueue_job(
+                                "execute_task", task.id, task.goal, task.config,
+                                _queue_name="agentos:tasks",
+                            )
+                    await db.commit()
+                    logger.info("Re-enqueued %d stuck tasks", len(stuck_tasks))
+    except Exception as e:
+        logger.warning("Task recovery check failed: %s", e)
+
     logger.info("AgentOS v0.1.0 started (%d env warnings)", len(env_warnings))
 
     yield
 
     # --- Shutdown ---
+    if getattr(app, "state", None) and getattr(app.state, "arq_pool", None):
+        await app.state.arq_pool.close()
     await engine.dispose()
     logger.info("AgentOS shutdown complete")
 

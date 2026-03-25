@@ -61,6 +61,13 @@ async def list_agents(user: AuthUser = Depends(require_auth), db: AsyncSession =
     return core + custom
 
 
+@router.get("/health")
+async def agents_health(user: AuthUser = Depends(require_auth)):
+    """Check which agents are available (real) vs unavailable (stub)."""
+    from agents.dispatcher import get_agent_status
+    return get_agent_status()
+
+
 @router.get("/deerflow/status")
 async def deerflow_status(user: AuthUser = Depends(require_auth)):
     """Check DeerFlow 2.0 service status and available skills."""

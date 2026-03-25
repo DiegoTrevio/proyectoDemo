@@ -96,16 +96,22 @@ class ResearcherAgent(AbstractAgent):
             all_results.extend(exa_results)
 
         if complexity == "complex":
-            # Deep extraction from top URLs
-            top_urls = [r.url for r in tavily_results[:2] if r.url]
-            for url in top_urls:
-                extracted = await self.firecrawl.extract(url)
-                if extracted:
-                    all_results.append(extracted)
+            # Deep extraction from top URLs (requires FIRECRAWL_API_KEY)
+            if self.firecrawl.available:
+                top_urls = [r.url for r in tavily_results[:2] if r.url]
+                for url in top_urls:
+                    extracted = await self.firecrawl.extract(url)
+                    if extracted:
+                        all_results.append(extracted)
+            else:
+                logger.info("Firecrawl not configured — skipping deep extraction")
 
-            # Verified facts via Perplexity
-            perplexity_results = await self.perplexity.search(query)
-            all_results.extend(perplexity_results)
+            # Verified facts via Perplexity (requires PERPLEXITY_API_KEY)
+            if self.perplexity.available:
+                perplexity_results = await self.perplexity.search(query)
+                all_results.extend(perplexity_results)
+            else:
+                logger.info("Perplexity not configured — skipping factual verification")
 
         return all_results
 

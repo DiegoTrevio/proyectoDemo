@@ -1,13 +1,12 @@
 """Task management endpoints."""
 
-import asyncio
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,10 +64,11 @@ def _task_to_response(task: Task) -> TaskResponse:
 @router.post("", response_model=TaskResponse, status_code=201)
 async def create_task(
     body: TaskCreate,
+    request: Request,
     user: AuthUser = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new task and queue it for execution."""
+    """Create a new task and queue it for execution via arq worker."""
     if body.model_preference:
         if body.model_preference not in _ALLOWED_MODELS:
             raise HTTPException(status_code=400, detail=f"Unknown model: {body.model_preference}")
@@ -103,17 +103,27 @@ async def create_task(
     await r.lpush("task_queue", task.id)
     await r.close()
 
-    # Launch orchestrator in background
-    asyncio.create_task(_run_orchestrator(task.id, task.goal, body.config))
+    # Enqueue task in arq worker for persistent execution
+    arq_pool = getattr(request.app.state, "arq_pool", None)
+    if arq_pool:
+        await arq_pool.enqueue_job(
+            "execute_task", task.id, task.goal, body.config,
+            _queue_name="agentos:tasks",
+        )
+        logger.info("Task %s enqueued in arq worker", task.id)
+    else:
+        # Fallback: run inline if worker not configured (dev mode)
+        import asyncio
+        logger.warning("arq pool not available — running task %s inline (dev mode)", task.id)
+        asyncio.create_task(_run_orchestrator_fallback(task.id, task.goal, body.config))
 
     return _task_to_response(task)
 
 
-async def _run_orchestrator(task_id: str, goal: str, config: dict | None):
-    """Background coroutine: run orchestrator and update DB when done."""
+async def _run_orchestrator_fallback(task_id: str, goal: str, config: dict | None):
+    """Fallback for dev mode when arq worker is not running."""
     from agents.orchestrator import run_task
 
-    # Update status to running
     async with async_session() as db:
         task = await db.get(Task, task_id)
         if task:
@@ -130,7 +140,6 @@ async def _run_orchestrator(task_id: str, goal: str, config: dict | None):
         status = "failed"
         result = {"error": str(e)}
 
-    # Persist final state
     async with async_session() as db:
         task = await db.get(Task, task_id)
         if task:

@@ -42,6 +42,7 @@ class AgentResult:
     tokens_used: int = 0
     cost: float = 0.0
     error: str | None = None
+    is_stub: bool = False
 
 
 class AbstractAgent(ABC):

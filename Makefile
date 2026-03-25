@@ -32,6 +32,9 @@ dev: ## Run backend in development mode (local, no Docker)
 dev-frontend: ## Run frontend in development mode
 	cd frontend && npm run dev
 
+worker: ## Start task worker (arq)
+	cd backend && arq workers.task_worker.WorkerSettings
+
 # ─── Database ─────────────────────────────────────────────────────────
 migrate: ## Run Alembic migrations
 	cd backend && alembic upgrade head

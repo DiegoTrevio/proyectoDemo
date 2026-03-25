@@ -10,7 +10,7 @@ logger = logging.getLogger("agentos.dispatcher")
 # ─── Stub agents (to be replaced with real implementations) ───────────────
 
 class _StubAgent:
-    """Placeholder agent that returns a not-implemented message."""
+    """Placeholder agent used when a real agent fails to load."""
 
     def __init__(self, name: str):
         self.name = name
@@ -18,10 +18,14 @@ class _StubAgent:
     async def execute(self, task: dict, context: dict) -> AgentResult:
         goal = task.get("goal", task.get("description", ""))
         return AgentResult(
-            success=True,
-            output=f"[{self.name}] Stub result for: {goal}",
+            success=False,
+            output=(
+                f"[UNAVAILABLE] Agent '{self.name}' could not be loaded. "
+                f"Check dependencies or configuration. Task was: {goal}"
+            ),
             tokens_used=0,
             cost=0.0,
+            is_stub=True,
         )
 
 
@@ -105,6 +109,17 @@ def get_available_agents() -> list[str]:
     return list(_AGENT_REGISTRY.keys())
 
 
+def get_agent_status() -> dict:
+    """Return status of each registered agent (real vs stub)."""
+    return {
+        name: {
+            "available": not isinstance(agent, _StubAgent),
+            "type": type(agent).__name__,
+        }
+        for name, agent in _AGENT_REGISTRY.items()
+    }
+
+
 async def dispatch(agent_name: str, task: dict, context: dict) -> AgentResult:
     """Dispatch a sub-task to the named agent.
 
@@ -120,6 +135,9 @@ async def dispatch(agent_name: str, task: dict, context: dict) -> AgentResult:
     if not agent:
         logger.warning("Unknown agent '%s', falling back to researcher", agent_name)
         agent = _AGENT_REGISTRY["researcher"]
+
+    if isinstance(agent, _StubAgent):
+        logger.warning("STUB agent used for '%s' — real agent unavailable", agent_name)
 
     logger.info("Dispatching to agent=%s task=%s", agent_name, task.get("goal", "")[:80])
     return await agent.execute(task, context)

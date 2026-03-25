@@ -121,6 +121,10 @@ class FirecrawlTool:
     def __init__(self):
         self.api_key = settings.firecrawl_api_key
 
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
+
     async def extract(self, url: str) -> SearchResult | None:
         """Extract full content from a single URL."""
         if not self.api_key:
@@ -165,6 +169,10 @@ class PerplexitySonarTool:
 
     def __init__(self):
         self.api_key = settings.perplexity_api_key
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
 
     async def search(self, query: str) -> list[SearchResult]:
         if not self.api_key:

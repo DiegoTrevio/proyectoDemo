@@ -72,12 +72,12 @@ jobs:
       - name: Install SDK
         run: pip install -e ./sdk
 
-      - name: Run backend tests
-        run: cd backend && python -m pytest tests/test_api.py tests/test_sdk_api.py tests/test_security.py -v --tb=short
+      - name: Run all backend tests
+        run: cd backend && python -m pytest tests/ -v --tb=short -x
 
-  # ─── Frontend Lint ─────────────────────────────────────────────────────
+  # ─── Frontend Lint & Build ─────────────────────────────────────────────
   frontend-lint:
-    name: Frontend Lint
+    name: Frontend Lint & Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,11 +94,14 @@ jobs:
       - name: Lint
         run: cd frontend && npm run lint
 
+      - name: Build
+        run: cd frontend && npm run build
+
   # ─── Docker Build ──────────────────────────────────────────────────────
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [sdk-tests, backend-tests]
+    needs: [sdk-tests, backend-tests, frontend-lint]
     steps:
       - uses: actions/checkout@v4
 
@@ -107,3 +110,75 @@ jobs:
 
       - name: Build frontend image
         run: docker build -f Dockerfile.frontend --target production -t agentos-frontend:${{ github.sha }} .
+
+  # ─── Integration Test ──────────────────────────────────────────────────
+  integration-test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    env:
+      TESTING: "1"
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test"
+      REDIS_URL: "redis://localhost:6379"
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -e ./sdk
+
+      - name: Start backend and verify health
+        run: |
+          cd backend && python -c "
+          import asyncio
+          from api.main import app
+          print('App created successfully')
+          " && echo "Backend module loads OK"
+
+      - name: Verify health endpoint
+        run: |
+          cd backend && timeout 15 python -c "
+          import uvicorn, asyncio, httpx, sys
+
+          async def test():
+              config = uvicorn.Config('api.main:app', host='127.0.0.1', port=8000, log_level='error')
+              server = uvicorn.Server(config)
+              task = asyncio.create_task(server.serve())
+              await asyncio.sleep(3)
+              async with httpx.AsyncClient() as client:
+                  resp = await client.get('http://127.0.0.1:8000/health')
+                  print(f'Health check: {resp.status_code}')
+                  assert resp.status_code == 200, f'Expected 200, got {resp.status_code}'
+              server.should_exit = True
+              await task
+
+          asyncio.run(test())
+          " && echo "Integration test passed"

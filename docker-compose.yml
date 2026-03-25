@@ -35,6 +35,31 @@ services:
           memory: 512M
     restart: unless-stopped
 
+  # ─── Task Worker (arq) ───────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: arq workers.task_worker.WorkerSettings
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - agentOS-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+    restart: unless-stopped
+
   # ─── Frontend (Next.js) ─────────────────────────────────────────────
   frontend:
     build:

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { SuperTokensProvider } from "./supertokens-provider";
 
 export const metadata: Metadata = {
   title: "AgentOS",
@@ -21,10 +22,12 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased bg-bg-primary text-text-primary min-h-screen">
-        <div className="flex flex-col min-h-screen">
-          <Header />
-          <main className="flex-1">{children}</main>
-        </div>
+        <SuperTokensProvider>
+          <div className="flex flex-col min-h-screen">
+            <Header />
+            <main className="flex-1">{children}</main>
+          </div>
+        </SuperTokensProvider>
       </body>
     </html>
   );

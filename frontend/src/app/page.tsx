@@ -26,6 +26,24 @@ const STATUS_CONFIG: Record<
   cancelled: { icon: XCircle, color: "text-text-tertiary", bg: "bg-bg-hover", label: "Cancelled" },
 };
 
+async function hasSession(): Promise<boolean> {
+  try {
+    const Session = await import("supertokens-auth-react/recipe/session");
+    return await Session.doesSessionExist();
+  } catch {
+    return false;
+  }
+}
+
+async function signOut(): Promise<void> {
+  try {
+    const Session = await import("supertokens-auth-react/recipe/session");
+    await Session.signOut();
+  } catch {
+    // SuperTokens not available
+  }
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -34,26 +52,43 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [authMethod, setAuthMethod] = useState<"session" | "apikey" | null>(null);
 
-  // Load API key from localStorage on mount
+  // Check authentication: SuperTokens session first, then API key fallback
   useEffect(() => {
-    const key = loadApiKey();
-    if (!key) {
+    async function checkAuth() {
+      if (await hasSession()) {
+        setAuthMethod("session");
+        setNeedsAuth(false);
+        return;
+      }
+      const key = loadApiKey();
+      if (key) {
+        setAuthMethod("apikey");
+        setNeedsAuth(false);
+        return;
+      }
       setNeedsAuth(true);
     }
+    checkAuth();
   }, []);
 
   const handleLogin = () => {
     if (apiKeyInput.trim()) {
       setApiKey(apiKeyInput.trim());
+      setAuthMethod("apikey");
       setNeedsAuth(false);
       setError(null);
       fetchTasks();
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (authMethod === "session") {
+      await signOut();
+    }
     clearApiKey();
+    setAuthMethod(null);
     setNeedsAuth(true);
     setTasks([]);
   };
