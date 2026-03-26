@@ -227,6 +227,7 @@ HIGH_RISK_ACTIONS = {
     "update_crm": "Modifying CRM data",
     "send_message": "Sending message via Slack/chat",
     "drop_table": "Dropping database table",
+    "code_execute": "Executing arbitrary code in sandbox",
 }
 
 

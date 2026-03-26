@@ -25,6 +25,7 @@ import os
 
 from agents.base_agent import AbstractAgent, AgentResult
 from agents.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from config.model_router import ORCHESTRATOR, select_model
 from tools.code_executor import CodeExecutor
 
 logger = logging.getLogger("agentos.agents.coder")
@@ -137,21 +138,18 @@ class CoderAgent(AbstractAgent):
         self.executor = CodeExecutor()
 
     def _select_model(self, goal: str, estimated_lines: int = 50) -> str:
-        """Select model based on task complexity."""
+        """Select model based on task complexity, delegating to the central router."""
         goal_lower = goal.lower()
 
-        # Architecture-level tasks -> Opus
+        # Architecture-level tasks -> Opus (always escalate)
         arch_signals = ["architect", "design system", "microservice", "database schema",
                         "api design", "system design"]
         if any(s in goal_lower for s in arch_signals):
-            return "agentOS/orchestrator"
+            return ORCHESTRATOR
 
-        # Simple scripts -> Qwen
-        if estimated_lines < 100:
-            return "agentOS/workhorse-qwen"
-
-        # Default -> Claude Sonnet
-        return "agentOS/workhorse"
+        # Delegate to cost-first router with fallback support
+        complexity = "simple" if estimated_lines < 100 else "medium"
+        return select_model("code", complexity).model
 
     def _parse_json_response(self, text: str) -> dict:
         """Extract JSON from LLM response, handling code fences."""
@@ -248,6 +246,9 @@ class CoderAgent(AbstractAgent):
         # Auto-detect dependencies if none specified
         if not dependencies:
             dependencies = self.executor._detect_dependencies(current_code)
+
+        # ── HITL: validate before executing arbitrary code ──
+        await self.validate_tool_call(task_id, "code_execute", current_code[:500])
 
         # ── Step 2: Execute + iterate loop ──
         while executions < _MAX_EXECUTIONS and consecutive_failures < _MAX_CONSECUTIVE_FAILURES:

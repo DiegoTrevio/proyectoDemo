@@ -98,12 +98,16 @@ class Tenant(Base):
     """Organization / customer account."""
     __tablename__ = "tenants"
     __table_args__ = (
-        CheckConstraint("plan IN ('free', 'cloud', 'enterprise')", name="ck_tenants_plan"),
+        CheckConstraint(
+            "plan IN ('free', 'starter', 'pro', 'team', 'enterprise')",
+            name="ck_tenants_plan",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
-    plan: Mapped[str] = mapped_column(String(32), default="free")  # free, cloud, enterprise
+    plan: Mapped[str] = mapped_column(String(32), default="free")
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

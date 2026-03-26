@@ -14,6 +14,7 @@ import logging
 
 from agents.base_agent import AbstractAgent, AgentResult
 from agents.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from config.model_router import select_model
 from tools.file_generator import generate_docx, generate_excel, generate_pdf, generate_pptx
 from tools.image_generator import generate_image, generate_presentation_images
 
@@ -65,12 +66,11 @@ class DocumentAgent(AbstractAgent):
         super().__init__(circuit_breaker or CircuitBreaker(cb_config))
 
     def _select_model(self, goal: str) -> str:
-        """Select model based on document complexity."""
+        """Select model via cost-first router with automatic fallback."""
         goal_lower = goal.lower()
         simple_signals = ["template", "simple", "basic", "quick", "list", "table"]
-        if any(s in goal_lower for s in simple_signals):
-            return "agentOS/workhorse-qwen"
-        return "agentOS/workhorse-gemini"
+        complexity = "simple" if any(s in goal_lower for s in simple_signals) else "medium"
+        return select_model("document", complexity).model
 
     async def execute(self, task: dict, context: dict) -> AgentResult:
         """Generate a document based on the task description."""

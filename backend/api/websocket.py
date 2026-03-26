@@ -47,6 +47,21 @@ async def task_websocket(websocket: WebSocket, task_id: str):
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # Parse JSON to check for approval responses
+            try:
+                data = json.loads(raw)
+                if data.get("type") == "approval_response":
+                    from security.approval_gates import handle_approval_response
+                    await handle_approval_response(
+                        approval_id=data.get("approval_id", ""),
+                        approved=data.get("approved", False),
+                        user_id=data.get("user_id", ""),
+                    )
+                    continue
+            except (json.JSONDecodeError, ValueError):
+                pass  # Not JSON — treat as plain user message
+
             # Publish user input so agents can consume it
             payload = json.dumps({
                 "type": "user_message",

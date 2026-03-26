@@ -10,6 +10,7 @@ import logging
 
 from agents.base_agent import AbstractAgent, AgentResult
 from agents.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from config.model_router import select_model
 from tools.browser_tool import BrowserTool
 
 logger = logging.getLogger("agentos.agents.browser")
@@ -88,8 +89,9 @@ class BrowserAgent(AbstractAgent):
                 )
 
             # First, try the full browser-use agent approach
+            browser_model = select_model("browser", "medium").model
             browser_use_result = await browser.run_browser_use_task(
-                task=goal, model="agentOS/workhorse-kimi",
+                task=goal, model=browser_model,
             )
 
             if browser_use_result.success and browser_use_result.content:
@@ -116,7 +118,7 @@ class BrowserAgent(AbstractAgent):
 
             plan_text, cb_state = await self.call_llm(
                 plan_messages, cb_state,
-                model_override="agentOS/workhorse-kimi",
+                model_override=browser_model,
                 max_tokens=2048,
             )
 
@@ -137,6 +139,7 @@ class BrowserAgent(AbstractAgent):
                 logger.info("Browser step %d: %s", i + 1, action)
 
                 if action == "navigate":
+                    await self.validate_tool_call(task_id, "browser_navigate", step.get("url", ""))
                     result = await browser.navigate(step.get("url", ""))
                 elif action == "click":
                     result = await browser.click(step.get("selector", ""))
@@ -184,7 +187,7 @@ class BrowserAgent(AbstractAgent):
 
                 output, cb_state = await self.call_llm(
                     synth_messages, cb_state,
-                    model_override="agentOS/workhorse-kimi",
+                    model_override=browser_model,
                     max_tokens=4096,
                 )
             else:

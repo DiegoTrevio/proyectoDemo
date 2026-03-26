@@ -192,13 +192,9 @@ class ResearcherAgent(AbstractAgent):
             )},
         ]
 
-        # Choose model based on complexity
-        model_override = None
-        if complexity == "simple":
-            model_override = "agentOS/workhorse-qwen"
-        elif complexity == "complex":
-            model_override = "agentOS/workhorse-gemini"
-        # medium uses default (workhorse-gemini via model_router)
+        # Choose model via cost-first router with automatic fallback
+        from config.model_router import select_model
+        model_override = select_model("research", complexity).model
 
         try:
             response_text, cb_state = await self.call_llm(

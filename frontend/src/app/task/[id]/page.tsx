@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Clock, DollarSign } from "lucide-react";
 import { AgentStream } from "@/components/AgentStream";
 import { WorkflowGraph } from "@/components/WorkflowGraph";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
-import { getTask, type Task, type Artifact } from "@/lib/api";
+import { ApprovalModal } from "@/components/ApprovalModal";
+import { getTask, connectTaskWebSocket, type Task, type Artifact, type TaskEvent } from "@/lib/api";
 
 export default function TaskPage() {
   const params = useParams();
@@ -14,6 +15,31 @@ export default function TaskPage() {
   const [task, setTask] = useState<Task | null>(null);
   const [activeAgent, setActiveAgent] = useState<string>("orchestrator");
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<TaskEvent | null>(null);
+  const wsRef = useRef<{ send: (msg: string) => void; close: () => void } | null>(null);
+
+  // Connect WebSocket for HITL approval requests
+  useEffect(() => {
+    const ws = connectTaskWebSocket(
+      taskId,
+      (event) => {
+        if (event.type === "approval_required") {
+          setPendingApproval(event);
+        }
+      },
+    );
+    wsRef.current = ws;
+    return () => ws.close();
+  }, [taskId]);
+
+  const handleApprovalRespond = useCallback((approvalId: string, approved: boolean) => {
+    wsRef.current?.send(JSON.stringify({
+      type: "approval_response",
+      approval_id: approvalId,
+      approved,
+    }));
+    setPendingApproval(null);
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -63,6 +89,18 @@ export default function TaskPage() {
 
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col">
+      {/* HITL Approval Modal */}
+      {pendingApproval && (
+        <ApprovalModal
+          approvalId={pendingApproval.approval_id || ""}
+          action={pendingApproval.content}
+          reason={pendingApproval.data?.reason as string || "Action requires approval"}
+          riskLevel={pendingApproval.risk_level || "high"}
+          params={pendingApproval.params}
+          onRespond={handleApprovalRespond}
+        />
+      )}
+
       {/* Task header */}
       <div className="border-b border-border px-6 py-3 flex items-center gap-4">
         <a

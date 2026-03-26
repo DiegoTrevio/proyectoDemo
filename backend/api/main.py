@@ -143,6 +143,10 @@ app = FastAPI(
 # ─── Rate Limiting ────────────────────────────────────────────────────────
 app.add_middleware(RateLimitMiddleware)
 
+# ─── Billing Enforcement ─────────────────────────────────────────────────
+from integrations.billing_middleware import BillingMiddleware  # noqa: E402
+app.add_middleware(BillingMiddleware)
+
 # ─── CORS ──────────────────────────────────────────────────────────────────
 _cors_origins = [
     o.strip()

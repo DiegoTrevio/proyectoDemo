@@ -213,4 +213,14 @@ async def cancel_task(
     task.status = "cancelled"
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
+
+    # Signal running orchestrator to stop via Redis
+    try:
+        from config.settings import settings
+        r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
+        await r.set(f"task:{task_id}:status", "cancelled", ex=86400)
+        await r.close()
+    except Exception:
+        pass  # Redis unavailable — DB update is sufficient
+
     return {"task_id": task_id, "status": "cancelled"}

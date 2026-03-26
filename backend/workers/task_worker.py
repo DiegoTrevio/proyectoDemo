@@ -42,10 +42,16 @@ async def execute_task(ctx: dict, task_id: str, goal: str, config: dict | None) 
         task.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
+    total_cost = 0.0
     try:
         final_output = await run_task(task_id, goal, config)
         status = "completed"
-        result = {"output": final_output}
+        # run_task may return a dict with cost info or a string
+        if isinstance(final_output, dict):
+            total_cost = final_output.get("total_cost", 0.0)
+            result = {"output": final_output.get("output", str(final_output))}
+        else:
+            result = {"output": final_output}
     except Exception as e:
         logger.exception("Orchestrator failed for task %s", task_id)
         status = "failed"
@@ -60,7 +66,16 @@ async def execute_task(ctx: dict, task_id: str, goal: str, config: dict | None) 
             task.updated_at = datetime.now(timezone.utc)
             await db.commit()
 
-    logger.info("Task %s finished with status=%s", task_id, status)
+    # Track usage for billing enforcement
+    if status == "completed":
+        try:
+            from integrations.stripe_billing import increment_usage
+            user_id = config.get("user_id", "default") if config else "default"
+            await increment_usage(user_id, cost=total_cost)
+        except Exception as e:
+            logger.warning("Usage tracking failed for task %s: %s", task_id, e)
+
+    logger.info("Task %s finished with status=%s cost=%.4f", task_id, status, total_cost)
     return status
 
 

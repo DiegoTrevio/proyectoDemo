@@ -102,11 +102,14 @@ export interface Artifact {
 }
 
 export interface TaskEvent {
-  type: "thought" | "action" | "result" | "error" | "status" | "artifact";
+  type: "thought" | "action" | "result" | "error" | "status" | "artifact" | "approval_required";
   content: string;
   agent?: string;
   timestamp: string;
   data?: Record<string, unknown>;
+  approval_id?: string;
+  risk_level?: string;
+  params?: Record<string, string>;
 }
 
 export interface CostEstimate {
@@ -176,6 +179,55 @@ export async function estimateCost(
     method: "POST",
     body: JSON.stringify({ goal, model }),
   });
+}
+
+export interface UsageData {
+  plan: string;
+  tasks_used: number;
+  tasks_limit: number;
+  cost_this_month: number;
+}
+
+export async function getUsage(): Promise<UsageData> {
+  return request<UsageData>("/billing/usage");
+}
+
+export async function createCheckoutSession(planId: string): Promise<{ url: string }> {
+  return request<{ url: string }>("/billing/create-checkout-session", {
+    method: "POST",
+    body: JSON.stringify({ plan_id: planId }),
+  });
+}
+
+export async function getPortalUrl(): Promise<{ url: string }> {
+  return request<{ url: string }>("/billing/portal");
+}
+
+// ── API Keys ────────────────────────────────────────────────────────────
+
+export interface ApiKeyInfo {
+  id: string;
+  key_prefix: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+}
+
+export async function listApiKeys(): Promise<ApiKeyInfo[]> {
+  return request<ApiKeyInfo[]>("/keys");
+}
+
+export async function createApiKey(name: string): Promise<{ key: string; id: string }> {
+  return request<{ key: string; id: string }>("/keys", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function revokeApiKey(keyId: string): Promise<void> {
+  await request(`/keys/${keyId}`, { method: "DELETE" });
 }
 
 // ── Agents ───────────────────────────────────────────────────────────────

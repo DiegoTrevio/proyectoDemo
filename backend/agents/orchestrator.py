@@ -295,6 +295,17 @@ async def execute_node(state: AgentState) -> dict:
     results = list(state["results"])
     errors = list(state["errors"])
 
+    # ── Cancellation check via Redis ──
+    try:
+        r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
+        cached = await r.get(f"task:{task_id}:status")
+        await r.close()
+        if cached and cached.decode() == "cancelled":
+            await _publish(task_id, "action", "Task cancelled by user")
+            return {"status": "deliver", "final_output": "Task was cancelled by user."}
+    except Exception:
+        pass  # Redis unavailable — continue execution
+
     if current_step >= len(plan):
         return {"status": "reflect"}
 
@@ -429,10 +440,14 @@ async def deliver_node(state: AgentState) -> dict:
     else:
         final_output = "No results produced."
 
+    # Calculate total cost from circuit breaker state
+    cb_state = state.get("cb_state")
+    total_cost = cb_state.total_cost if cb_state else 0.0
+
     await _publish(task_id, "result", final_output)
     await _publish(task_id, "action", "Task completed")
 
-    return {"final_output": final_output, "status": "done"}
+    return {"final_output": final_output, "status": "done", "total_cost": total_cost}
 
 
 # ─── Routing ──────────────────────────────────────────────────────────────

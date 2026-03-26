@@ -66,6 +66,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         else:
             identifier = request.client.host if request.client else "unknown"
 
+        # Apply plan-based multiplier
+        limit = await self._apply_plan_multiplier(request, limit)
+
         # Check rate limit
         allowed, remaining, retry_after = await self._check_rate(identifier, path, limit)
 
@@ -88,6 +91,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         return response
+
+    _PLAN_MULTIPLIERS = {"free": 1, "starter": 2, "pro": 5, "team": 10, "enterprise": 50}
+
+    async def _apply_plan_multiplier(self, request: Request, base_limit: int) -> int:
+        """Scale rate limit by user's billing plan."""
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return base_limit
+        try:
+            r = aioredis.from_url(settings.redis_url, socket_connect_timeout=1)
+            plan = await r.get(f"billing:{user_id}:plan")
+            await r.close()
+            if plan:
+                multiplier = self._PLAN_MULTIPLIERS.get(plan.decode(), 1)
+                return base_limit * multiplier
+        except Exception:
+            pass
+        return base_limit
 
     async def _check_rate(
         self,
