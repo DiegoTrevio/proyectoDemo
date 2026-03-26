@@ -1,10 +1,14 @@
-"""Tests for LiteLLM proxy integration and model routing logic."""
+"""Tests for LiteLLM proxy integration and cost-first model routing."""
+
+import os
+from unittest.mock import patch
 
 import httpx
 import pytest
 
 from config.model_router import (
     CHEAP,
+    CHEAP_QWEN,
     FACTS,
     ORCHESTRATOR,
     WORKHORSE,
@@ -18,55 +22,75 @@ from config.model_router import (
 LITELLM_BASE_URL = "http://litellm:4000"
 
 
-# ─── Unit tests: model_router.select_model ────────────────────────────────
+# ─── Unit tests: cost-first routing ─────────────────────────────────────────
 
-class TestSelectModel:
-    """Verify routing logic without any external dependencies."""
+class TestCostFirstRouting:
+    """Verify cost-first routing: cheapest model is preferred for simple/medium tasks."""
 
     def test_orchestrate_always_uses_orchestrator(self):
         for complexity in ("simple", "medium", "complex"):
             result = select_model("orchestrate", complexity)
             assert result.model == ORCHESTRATOR
 
-    def test_research_simple_uses_cheap(self):
-        result = select_model("research", "simple")
-        assert result.model == CHEAP
-
-    def test_research_medium_uses_gemini(self):
-        result = select_model("research", "medium")
-        assert result.model == WORKHORSE_GEMINI
-
-    def test_research_complex_uses_workhorse_with_facts(self):
-        result = select_model("research", "complex")
-        assert result.model == WORKHORSE
-        assert result.supplementary == FACTS
-
-    def test_code_simple_uses_qwen(self):
+    def test_code_simple_uses_cheap_qwen(self):
         result = select_model("code", "simple")
+        assert result.model == CHEAP_QWEN
+
+    def test_code_medium_uses_workhorse_qwen(self):
+        result = select_model("code", "medium")
         assert result.model == WORKHORSE_QWEN
 
     def test_code_complex_uses_workhorse(self):
         result = select_model("code", "complex")
         assert result.model == WORKHORSE
 
+    def test_research_simple_uses_cheap_qwen(self):
+        result = select_model("research", "simple")
+        assert result.model == CHEAP_QWEN
+
+    def test_research_medium_uses_workhorse_qwen(self):
+        result = select_model("research", "medium")
+        assert result.model == WORKHORSE_QWEN
+
+    def test_research_complex_uses_workhorse_with_facts(self):
+        result = select_model("research", "complex")
+        assert result.model == WORKHORSE
+        assert result.supplementary == FACTS
+
     def test_browser_always_uses_kimi(self):
         for complexity in ("simple", "medium", "complex"):
             result = select_model("browser", complexity)
             assert result.model == WORKHORSE_KIMI
 
-    def test_document_simple_uses_qwen(self):
+    def test_document_simple_uses_cheap_qwen(self):
         result = select_model("document", "simple")
+        assert result.model == CHEAP_QWEN
+
+    def test_document_medium_uses_workhorse_qwen(self):
+        result = select_model("document", "medium")
         assert result.model == WORKHORSE_QWEN
 
     def test_document_complex_uses_gemini(self):
         result = select_model("document", "complex")
         assert result.model == WORKHORSE_GEMINI
 
-    def test_route_and_validate_use_cheap(self):
+    def test_report_simple_uses_cheap_qwen(self):
+        result = select_model("report", "simple")
+        assert result.model == CHEAP_QWEN
+
+    def test_report_medium_uses_workhorse_qwen(self):
+        result = select_model("report", "medium")
+        assert result.model == WORKHORSE_QWEN
+
+    def test_report_complex_uses_gemini(self):
+        result = select_model("report", "complex")
+        assert result.model == WORKHORSE_GEMINI
+
+    def test_route_and_validate_use_cheap_qwen(self):
         for task in ("route", "validate"):
             for complexity in ("simple", "medium", "complex"):
                 result = select_model(task, complexity)
-                assert result.model == CHEAP
+                assert result.model == CHEAP_QWEN
 
     def test_invalid_task_type_raises(self):
         with pytest.raises(ValueError, match="Unknown task_type"):
@@ -80,6 +104,66 @@ class TestSelectModel:
         result = select_model("code", "simple")
         assert isinstance(result, ModelSelection)
         assert result.reason
+
+
+# ─── Fallback tests: graceful degradation when API keys missing ──────────────
+
+class TestFallbackRouting:
+    """Verify fallback when Qwen/Kimi API keys are not configured."""
+
+    def test_qwen_fallback_to_gemini_when_no_key(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = ""
+            mock_settings.kimi_api_key = "kimi-key-123"
+            result = select_model("code", "medium")
+            assert result.model == WORKHORSE_GEMINI
+            assert "fallback" in result.reason
+
+    def test_cheap_qwen_fallback_to_cheap_when_no_key(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = ""
+            mock_settings.kimi_api_key = "kimi-key-123"
+            result = select_model("code", "simple")
+            assert result.model == CHEAP
+            assert "fallback" in result.reason
+
+    def test_kimi_fallback_to_workhorse_when_no_key(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = "qwen-key-123"
+            mock_settings.kimi_api_key = ""
+            result = select_model("browser", "medium")
+            assert result.model == WORKHORSE
+            assert "fallback" in result.reason
+
+    def test_no_fallback_when_keys_present(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = "qwen-key-123"
+            mock_settings.kimi_api_key = "kimi-key-123"
+            result = select_model("code", "simple")
+            assert result.model == CHEAP_QWEN
+            assert "fallback" not in result.reason
+
+    def test_orchestrator_unaffected_by_missing_keys(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = ""
+            mock_settings.kimi_api_key = ""
+            result = select_model("orchestrate", "complex")
+            assert result.model == ORCHESTRATOR
+
+    def test_complex_code_unaffected_by_missing_keys(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = ""
+            mock_settings.kimi_api_key = ""
+            result = select_model("code", "complex")
+            assert result.model == WORKHORSE
+
+    def test_supplementary_preserved_in_fallback(self):
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = "qwen-key-123"
+            mock_settings.kimi_api_key = "kimi-key-123"
+            result = select_model("research", "complex")
+            assert result.model == WORKHORSE
+            assert result.supplementary == FACTS
 
 
 # ─── Integration tests: LiteLLM proxy (require running services) ──────────

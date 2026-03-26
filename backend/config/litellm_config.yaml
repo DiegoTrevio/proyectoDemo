@@ -1,10 +1,11 @@
 # ═══════════════════════════════════════════════════════════════════════
-# LiteLLM Model Configuration — AgentOS
+# LiteLLM Model Configuration — AgentOS (Cost-First Routing)
 # ═══════════════════════════════════════════════════════════════════════
 #
 # REQUIRED: ANTHROPIC_API_KEY + GOOGLE_API_KEY  (~$35/month)
-# OPTIONAL: Uncomment Qwen/Kimi/Perplexity sections for extra
-#           fallbacks and cost optimization (~$30/month extra)
+# RECOMMENDED: QWEN_API_KEY + KIMI_API_KEY  (~$10/month)
+#   → Enables cost-first routing: 60-70% token savings
+#   → Without these keys, the model router falls back to Gemini/Sonnet
 #
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -19,8 +20,11 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
 
   # ═══════════════════════════════════════════════════════════════════
-  # TIER 2 — Workhorse (default for all agent execution)
-  # Cost: $0.003/1K (Sonnet) or $0.0005/1K (Gemini)
+  # TIER 2 — Workhorse (agent execution)
+  # Claude Sonnet: $0.003/1K — complex tasks only
+  # Gemini Flash: $0.0005/1K — complex documents, medium research
+  # Qwen 3.5+: $0.0004/1K — medium code, docs, research (cost-first)
+  # Kimi K2.5: $0.0004/1K — browser agent specialist (tool-calling)
   # ═══════════════════════════════════════════════════════════════════
   - model_name: agentOS/workhorse
     litellm_params:
@@ -32,34 +36,33 @@ model_list:
       model: gemini/gemini-3-flash
       api_key: os.environ/GOOGLE_API_KEY
 
-  # ── OPTIONAL: Uncomment to add Qwen & Kimi as fallback workhorses ──
-  # - model_name: agentOS/workhorse-qwen
-  #   litellm_params:
-  #     model: openai/qwen3.5-plus
-  #     api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-  #     api_key: os.environ/QWEN_API_KEY
-  #
-  # - model_name: agentOS/workhorse-kimi
-  #   litellm_params:
-  #     model: openai/kimi-k2.5
-  #     api_base: https://api.moonshot.ai/v1
-  #     api_key: os.environ/KIMI_API_KEY
+  - model_name: agentOS/workhorse-qwen
+    litellm_params:
+      model: openai/qwen3.5-plus
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/QWEN_API_KEY
+
+  - model_name: agentOS/workhorse-kimi
+    litellm_params:
+      model: openai/kimi-k2.5
+      api_base: https://api.moonshot.ai/v1
+      api_key: os.environ/KIMI_API_KEY
 
   # ═══════════════════════════════════════════════════════════════════
   # TIER 3 — Cheap (high-volume, low-cost tasks)
-  # Cost: ~$0.0001/1K tokens
+  # Gemini Lite: $0.0001/1K — fallback cheap tier
+  # Qwen 3-8B: $0.00008/1K — primary cheap tier (cost-first)
   # ═══════════════════════════════════════════════════════════════════
   - model_name: agentOS/cheap
     litellm_params:
       model: gemini/gemini-3.1-flash-lite
       api_key: os.environ/GOOGLE_API_KEY
 
-  # ── OPTIONAL: Uncomment for cheap Qwen fallback ──
-  # - model_name: agentOS/cheap-qwen
-  #   litellm_params:
-  #     model: openai/qwen3-8b
-  #     api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-  #     api_key: os.environ/QWEN_API_KEY
+  - model_name: agentOS/cheap-qwen
+    litellm_params:
+      model: openai/qwen3-8b
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/QWEN_API_KEY
 
   # ═══════════════════════════════════════════════════════════════════
   # TIER 4 — Specialists
@@ -85,18 +88,19 @@ model_list:
       api_key: os.environ/GOOGLE_API_KEY
 
 # ═══════════════════════════════════════════════════════════════════════
-# Routing & Fallbacks
+# Routing & Fallbacks (cost-first cascading)
 # ═══════════════════════════════════════════════════════════════════════
 router_settings:
   routing_strategy: simple-shuffle
   num_retries: 3
   timeout: 120
   fallbacks:
-    - agentOS/workhorse: [agentOS/workhorse-gemini]
-    - agentOS/orchestrator: [agentOS/workhorse-gemini]
-    # Uncomment if Qwen/Kimi enabled above:
-    # - agentOS/workhorse: [agentOS/workhorse-gemini, agentOS/workhorse-qwen, agentOS/workhorse-kimi]
-    # - agentOS/cheap: [agentOS/cheap-qwen]
+    - agentOS/workhorse: [agentOS/workhorse-gemini, agentOS/workhorse-qwen]
+    - agentOS/workhorse-qwen: [agentOS/workhorse-gemini, agentOS/cheap-qwen]
+    - agentOS/workhorse-kimi: [agentOS/workhorse-qwen, agentOS/workhorse-gemini]
+    - agentOS/cheap: [agentOS/cheap-qwen]
+    - agentOS/cheap-qwen: [agentOS/cheap]
+    - agentOS/orchestrator: [agentOS/workhorse]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
