@@ -148,7 +148,7 @@ export default function TaskPage() {
       {/* Split view */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT: Agent Stream (60%) */}
-        <div className="w-[60%] border-r border-border flex flex-col">
+        <div className="w-full md:w-[60%] border-r border-border flex flex-col">
           <AgentStream taskId={taskId} onActiveAgent={handleActiveAgent} />
 
           {/* Artifacts */}
@@ -160,7 +160,7 @@ export default function TaskPage() {
         </div>
 
         {/* RIGHT: Workflow Graph (40%) */}
-        <div className="w-[40%] flex flex-col">
+        <div className="hidden md:flex md:w-[40%] flex-col">
           <div className="flex items-center justify-between px-5 py-3 border-b border-border">
             <h2 className="text-[13px] font-semibold">Agent Workflow</h2>
             {activeAgent && (

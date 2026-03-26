@@ -98,7 +98,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_tenants_plan",
         "tenants",
-        sa.text("plan IN ('free', 'cloud', 'enterprise')"),
+        sa.text("plan IN ('free', 'starter', 'pro', 'team', 'enterprise')"),
     )
 
     # audit_events.risk_level must be valid

@@ -142,11 +142,23 @@ async def record_task_usage(
 ) -> bool:
     """Record a completed task for usage-based billing."""
     stripe = _get_stripe()
+    # Resolve real Stripe customer_id from database
+    actual_customer_id = user_id  # fallback
+    try:
+        from db.database import async_session
+        from db.models import Tenant
+        async with async_session() as db:
+            tenant = await db.get(Tenant, user_id)
+            if tenant and tenant.stripe_customer_id:
+                actual_customer_id = tenant.stripe_customer_id
+    except Exception:
+        pass
+
     try:
         stripe.billing.MeterEvent.create(
             event_name="agentOS_task",
             payload={
-                "stripe_customer_id": user_id,  # In prod, map user_id to Stripe customer
+                "stripe_customer_id": actual_customer_id,
                 "task_id": task_id,
                 "cost_usd": str(cost_usd),
                 "model": model_used,
@@ -242,6 +254,21 @@ async def handle_webhook(payload: bytes, signature: str) -> dict:
                 await r.close()
         except Exception as e:
             logger.warning("Failed to store plan: %s", e)
+
+        # Persist customer_id + plan to database
+        customer_id = data.get("customer", "")
+        if user_id and customer_id:
+            try:
+                from db.database import async_session
+                from db.models import Tenant
+                async with async_session() as db:
+                    tenant = await db.get(Tenant, user_id)
+                    if tenant:
+                        tenant.stripe_customer_id = customer_id
+                        tenant.plan = plan_id
+                        await db.commit()
+            except Exception as e:
+                logger.warning("Failed to update tenant: %s", e)
 
     elif event_type == "customer.subscription.updated":
         logger.info("Subscription updated: %s", data.get("id"))

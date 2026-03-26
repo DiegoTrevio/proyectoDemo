@@ -48,6 +48,7 @@ export default function BillingPage() {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getUsage()
@@ -61,7 +62,8 @@ export default function BillingPage() {
     try {
       const { url } = await createCheckoutSession(planId);
       window.location.href = url;
-    } catch {
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upgrade failed. Please try again.");
       setUpgrading(null);
     }
   };
@@ -83,6 +85,15 @@ export default function BillingPage() {
     <div className="max-w-[1200px] mx-auto px-6 py-10">
       <h1 className="text-2xl font-semibold mb-2">Billing</h1>
       <p className="text-text-secondary text-sm mb-8">Manage your subscription and usage</p>
+
+      {error && (
+        <div className="mb-6 px-4 py-3 rounded-lg bg-accent-red/10 border border-accent-red/20 flex items-center justify-between">
+          <span className="text-[13px] text-accent-red">{error}</span>
+          <button onClick={() => setError(null)} className="text-accent-red/60 hover:text-accent-red text-sm ml-4">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Current Usage */}
       <motion.div

@@ -1,5 +1,7 @@
 """Tests for billing middleware and usage tracking."""
 
+import json
+
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -115,3 +117,56 @@ class TestGetPlan:
 
         plan = get_plan("nonexistent")
         assert plan.task_limit == 5 or plan.name.lower() == "free"
+
+    def test_all_stripe_plans_match_db_constraint(self):
+        """Verify plan IDs match DB constraint values."""
+        from integrations.stripe_billing import PLANS
+
+        valid_plans = {"free", "starter", "pro", "team", "enterprise"}
+        for plan_id in PLANS:
+            assert plan_id in valid_plans, f"Plan '{plan_id}' not in DB constraint"
+
+
+class TestWebhookHandling:
+    """Test Stripe webhook event processing."""
+
+    @pytest.mark.asyncio
+    @patch("integrations.stripe_billing.settings")
+    async def test_checkout_completed_stores_plan(self, mock_settings):
+        """Webhook checkout.session.completed stores plan in Redis."""
+        mock_settings.stripe_secret_key = ""
+        mock_settings.stripe_webhook_secret = ""
+        mock_settings.redis_url = "redis://localhost:6379"
+
+        mock_r = AsyncMock()
+
+        with patch("redis.asyncio.from_url", return_value=mock_r):
+            from integrations.stripe_billing import handle_webhook
+
+            event = {
+                "type": "checkout.session.completed",
+                "data": {"object": {
+                    "client_reference_id": "user-1",
+                    "customer": "cus_abc123",
+                    "metadata": {"plan_id": "pro"},
+                }},
+            }
+            result = await handle_webhook(json.dumps(event).encode(), "")
+
+        assert result["received"] is True
+        assert result["type"] == "checkout.session.completed"
+        mock_r.set.assert_called()
+
+    @pytest.mark.asyncio
+    @patch("integrations.stripe_billing.settings")
+    async def test_unknown_event_still_acknowledged(self, mock_settings):
+        """Unknown webhook events are acknowledged without error."""
+        mock_settings.stripe_secret_key = ""
+        mock_settings.stripe_webhook_secret = ""
+
+        from integrations.stripe_billing import handle_webhook
+
+        event = {"type": "unknown.event", "data": {"object": {}}}
+        result = await handle_webhook(json.dumps(event).encode(), "")
+
+        assert result["received"] is True

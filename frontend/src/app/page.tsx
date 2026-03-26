@@ -233,7 +233,7 @@ export default function Dashboard() {
       </motion.div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         {[
           { icon: ListTodo, label: "Total Tasks", value: stats.total.toString(), color: "text-accent-blue" },
           { icon: Activity, label: "Running", value: stats.running.toString(), color: "text-accent-green" },
