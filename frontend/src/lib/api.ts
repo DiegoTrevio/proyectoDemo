@@ -233,14 +233,21 @@ export async function revokeApiKey(keyId: string): Promise<void> {
 // ── Agents ───────────────────────────────────────────────────────────────
 
 export interface AgentInfo {
-  id: string;
+  agent_id: string;
   name: string;
   type: string;
-  is_core: boolean;
+  system_prompt?: string;
+  tools: string[];
+  model?: string;
+  created_at: string;
 }
 
 export async function listAgents(): Promise<AgentInfo[]> {
   return request<AgentInfo[]>("/agents");
+}
+
+export async function getAgentsHealth(): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/agents/health");
 }
 
 // ── SSE stream ───────────────────────────────────────────────────────────

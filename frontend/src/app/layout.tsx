@@ -47,6 +47,7 @@ function Header() {
           <nav className="hidden md:flex items-center gap-1">
             {[
               { label: "Dashboard", href: "/" },
+              { label: "Agents", href: "/agents" },
               { label: "Billing", href: "/billing" },
               { label: "Settings", href: "/settings" },
             ].map((item) => (

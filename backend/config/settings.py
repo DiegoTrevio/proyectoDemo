@@ -1,3 +1,6 @@
+import secrets
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -63,12 +66,25 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
 
+    # URLs (override for production deployments)
+    frontend_url: str = "http://localhost:3000"
+    backend_url: str = "http://localhost:8000"
+    ollama_api_base: str = "http://localhost:11434"
+
     # Security
     manifest_signing_key: str = ""
-    api_key_salt: str = "secureagent-key-salt-v1"
-    cors_origins: str = "http://localhost:3000"  # Comma-separated list of allowed origins
+    api_key_salt: str = ""
+    cors_origins: str = ""  # Comma-separated list of allowed origins
 
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _fill_defaults(self):
+        if not self.api_key_salt:
+            object.__setattr__(self, "api_key_salt", secrets.token_hex(32))
+        if not self.cors_origins:
+            object.__setattr__(self, "cors_origins", self.frontend_url)
+        return self
 
 
 settings = Settings()

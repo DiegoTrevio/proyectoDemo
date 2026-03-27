@@ -77,7 +77,7 @@ model_list:
   - model_name: agentOS/on-premise
     litellm_params:
       model: ollama/llama4
-      api_base: http://localhost:11434
+      api_base: os.environ/OLLAMA_API_BASE
 
   # ═══════════════════════════════════════════════════════════════════
   # Images

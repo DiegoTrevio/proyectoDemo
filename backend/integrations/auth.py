@@ -70,8 +70,8 @@ def init_supertokens(app):
         init(
             app_info=InputAppInfo(
                 app_name="AgentOS",
-                api_domain="http://localhost:8000",
-                website_domain="http://localhost:3000",
+                api_domain=settings.backend_url,
+                website_domain=settings.frontend_url,
                 api_base_path="/auth",
                 website_base_path="/auth",
             ),

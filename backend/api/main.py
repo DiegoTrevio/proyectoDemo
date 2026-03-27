@@ -33,13 +33,13 @@ def _validate_environment() -> list[str]:
         if os.environ.get("TESTING") != "1":
             warnings.append("DATABASE_URL uses default/docker host — ensure this is correct for your environment")
 
-    # Security: API key salt should be changed from default
-    if settings.api_key_salt == "secureagent-key-salt-v1":
-        warnings.append("API_KEY_SALT is using the default value — change this in production!")
+    # Security: API key salt should be set explicitly for persistence
+    if not os.environ.get("API_KEY_SALT"):
+        warnings.append("API_KEY_SALT not set — using random value (API keys will NOT survive restarts!)")
 
     # Security: CORS origins should be explicit in production
-    if settings.cors_origins == "http://localhost:3000":
-        warnings.append("CORS_ORIGINS is set to localhost — update for production domains")
+    if "localhost" in settings.cors_origins:
+        warnings.append("CORS_ORIGINS contains localhost — update for production domains")
 
     return warnings
 
@@ -150,7 +150,7 @@ app.add_middleware(BillingMiddleware)
 # ─── CORS ──────────────────────────────────────────────────────────────────
 _cors_origins = [
     o.strip()
-    for o in (settings.cors_origins or "http://localhost:3000").split(",")
+    for o in settings.cors_origins.split(",")
     if o.strip()
 ]
 app.add_middleware(

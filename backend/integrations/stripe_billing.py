@@ -82,10 +82,12 @@ def _get_stripe():
 async def create_checkout_session(
     plan_id: str,
     user_id: str,
-    success_url: str = "http://localhost:3000/billing/success",
-    cancel_url: str = "http://localhost:3000/billing/cancel",
+    success_url: str | None = None,
+    cancel_url: str | None = None,
 ) -> dict:
     """Create a Stripe Checkout session for plan subscription."""
+    success_url = success_url or f"{settings.frontend_url}/billing/success"
+    cancel_url = cancel_url or f"{settings.frontend_url}/billing/cancel"
     stripe = _get_stripe()
     plan = get_plan(plan_id)
 
@@ -123,7 +125,7 @@ async def create_portal_session(customer_id: str) -> dict:
     try:
         session = stripe.billing_portal.Session.create(
             customer=customer_id,
-            return_url="http://localhost:3000/settings",
+            return_url=f"{settings.frontend_url}/settings",
         )
         return {"url": session.url}
     except Exception as e:
