@@ -3,7 +3,6 @@
 import json
 
 import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from integrations.billing_middleware import BillingMiddleware
@@ -85,13 +84,13 @@ class TestIncrementUsage:
     """Test usage tracking after task completion."""
 
     @pytest.mark.asyncio
-    @patch("integrations.stripe_billing.aioredis")
-    async def test_increment_usage(self, mock_redis_module):
+    @patch("redis.asyncio.from_url")
+    async def test_increment_usage(self, mock_from_url):
         """Increments task count and cost in Redis."""
         from integrations.stripe_billing import increment_usage
 
         mock_r = AsyncMock()
-        mock_redis_module.from_url.return_value = mock_r
+        mock_from_url.return_value = mock_r
 
         await increment_usage("user-123", cost=0.05)
 
@@ -131,12 +130,14 @@ class TestWebhookHandling:
     """Test Stripe webhook event processing."""
 
     @pytest.mark.asyncio
+    @patch("integrations.stripe_billing._get_stripe")
     @patch("integrations.stripe_billing.settings")
-    async def test_checkout_completed_stores_plan(self, mock_settings):
+    async def test_checkout_completed_stores_plan(self, mock_settings, mock_get_stripe):
         """Webhook checkout.session.completed stores plan in Redis."""
-        mock_settings.stripe_secret_key = ""
         mock_settings.stripe_webhook_secret = ""
         mock_settings.redis_url = "redis://localhost:6379"
+        mock_settings.frontend_url = "http://localhost:3000"
+        mock_get_stripe.return_value = MagicMock()
 
         mock_r = AsyncMock()
 
@@ -158,11 +159,13 @@ class TestWebhookHandling:
         mock_r.set.assert_called()
 
     @pytest.mark.asyncio
+    @patch("integrations.stripe_billing._get_stripe")
     @patch("integrations.stripe_billing.settings")
-    async def test_unknown_event_still_acknowledged(self, mock_settings):
+    async def test_unknown_event_still_acknowledged(self, mock_settings, mock_get_stripe):
         """Unknown webhook events are acknowledged without error."""
-        mock_settings.stripe_secret_key = ""
         mock_settings.stripe_webhook_secret = ""
+        mock_settings.frontend_url = "http://localhost:3000"
+        mock_get_stripe.return_value = MagicMock()
 
         from integrations.stripe_billing import handle_webhook
 

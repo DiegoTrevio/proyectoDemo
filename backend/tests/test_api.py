@@ -5,40 +5,10 @@ Integration tests (marked @pytest.mark.integration) require running services.
 """
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 
-# ─── Fixtures ─────────────────────────────────────────────────────────────
-
-@pytest_asyncio.fixture
-async def client():
-    """Create an async test client with a fresh in-memory database."""
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-    from db.models import Base
-    from db.database import get_db
-    from api.main import app
-
-    # Use SQLite for unit tests
-    test_engine = create_async_engine("sqlite+aiosqlite:///", echo=False)
-    test_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
-
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async def _override_db():
-        async with test_session() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _override_db
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
-    app.dependency_overrides.clear()
-    await test_engine.dispose()
+# Uses the shared `client` fixture from conftest.py (includes auth override)
 
 
 # ─── Health ───────────────────────────────────────────────────────────────
@@ -171,9 +141,10 @@ async def test_billing_usage(client: AsyncClient):
 
 # ─── SSE Stream ───────────────────────────────────────────────────────────
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_stream_endpoint_returns_event_stream(client: AsyncClient):
-    """Verify the SSE endpoint returns the correct content-type."""
+    """Verify the SSE endpoint returns the correct content-type (requires Redis)."""
     resp = await client.get("/api/v1/tasks/test-id/stream", headers={"Accept": "text/event-stream"})
     assert resp.headers["content-type"].startswith("text/event-stream")
 
