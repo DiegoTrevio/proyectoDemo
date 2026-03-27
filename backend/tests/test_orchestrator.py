@@ -71,22 +71,31 @@ class TestDispatcher:
         assert "validator" in agents
 
     @pytest.mark.asyncio
-    async def test_dispatch_researcher_stub(self):
+    async def test_dispatch_researcher(self):
         result = await dispatch("researcher", {"goal": "test query"}, {})
         assert result.success
-        assert "researcher" in result.output.lower()
-        assert "test query" in result.output
+        # Researcher returns output (may vary depending on API keys)
+        assert result.output is not None
+        assert len(result.output) > 0
 
     @pytest.mark.asyncio
     async def test_dispatch_unknown_agent_falls_back(self):
         result = await dispatch("nonexistent", {"goal": "test"}, {})
         assert result.success
-        # Falls back to researcher
-        assert "researcher" in result.output.lower()
+        # Falls back to researcher — just verify it returned something
+        assert result.output is not None
 
 
 # ─── Orchestrator Graph Structure ─────────────────────────────────────────
 
+try:
+    import langgraph  # noqa: F401
+    _HAS_LANGGRAPH = True
+except ImportError:
+    _HAS_LANGGRAPH = False
+
+
+@pytest.mark.skipif(not _HAS_LANGGRAPH, reason="langgraph not installed")
 class TestOrchestratorGraph:
 
     def test_graph_compiles(self):

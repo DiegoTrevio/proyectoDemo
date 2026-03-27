@@ -1,7 +1,7 @@
 """Tests for LiteLLM proxy integration and cost-first model routing."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import httpx
 import pytest
@@ -25,7 +25,16 @@ LITELLM_BASE_URL = "http://litellm:4000"
 # ─── Unit tests: cost-first routing ─────────────────────────────────────────
 
 class TestCostFirstRouting:
-    """Verify cost-first routing: cheapest model is preferred for simple/medium tasks."""
+    """Verify cost-first routing with all API keys configured."""
+
+    @pytest.fixture(autouse=True)
+    def mock_all_api_keys(self):
+        """Ensure all API keys are present so routing tests hit the primary path."""
+        mock = MagicMock()
+        mock.qwen_api_key = "qwen-key-test"
+        mock.kimi_api_key = "kimi-key-test"
+        with patch("config.model_router.settings", mock):
+            yield
 
     def test_orchestrate_always_uses_orchestrator(self):
         for complexity in ("simple", "medium", "complex"):

@@ -1,6 +1,7 @@
 """Tests for the Coder agent and E2B code executor."""
 
 import pytest
+from unittest.mock import patch
 
 from tools.code_executor import CodeExecutor, ExecutionResult
 
@@ -70,16 +71,44 @@ class TestCodeExecutor:
 class TestCoderAgent:
 
     def test_model_selection_simple(self):
+        """Simple code (<100 lines) uses cheap-qwen when Qwen key is available."""
         from agents.coder import CoderAgent
-        agent = CoderAgent()
-        model = agent._select_model("write a hello world script", estimated_lines=10)
-        assert model == "agentOS/workhorse-qwen"
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = "qwen-key-123"
+            mock_settings.kimi_api_key = "kimi-key-123"
+            agent = CoderAgent()
+            model = agent._select_model("write a hello world script", estimated_lines=10)
+            assert model == "agentOS/cheap-qwen"
 
-    def test_model_selection_complex(self):
+    def test_model_selection_simple_fallback(self):
+        """Simple code falls back to cheap when Qwen key is missing."""
         from agents.coder import CoderAgent
-        agent = CoderAgent()
-        model = agent._select_model("build a REST API with auth", estimated_lines=200)
-        assert model == "agentOS/workhorse"
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = ""
+            mock_settings.kimi_api_key = ""
+            agent = CoderAgent()
+            model = agent._select_model("write a hello world script", estimated_lines=10)
+            assert model == "agentOS/cheap"
+
+    def test_model_selection_medium(self):
+        """Medium code (>=100 lines) uses workhorse-qwen when Qwen key is available."""
+        from agents.coder import CoderAgent
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = "qwen-key-123"
+            mock_settings.kimi_api_key = "kimi-key-123"
+            agent = CoderAgent()
+            model = agent._select_model("build a REST API with auth", estimated_lines=200)
+            assert model == "agentOS/workhorse-qwen"
+
+    def test_model_selection_medium_fallback(self):
+        """Medium code falls back to workhorse-gemini when Qwen key is missing."""
+        from agents.coder import CoderAgent
+        with patch("config.model_router.settings") as mock_settings:
+            mock_settings.qwen_api_key = ""
+            mock_settings.kimi_api_key = ""
+            agent = CoderAgent()
+            model = agent._select_model("build a REST API with auth", estimated_lines=200)
+            assert model == "agentOS/workhorse-gemini"
 
     def test_model_selection_architecture(self):
         from agents.coder import CoderAgent

@@ -11,6 +11,20 @@ import pytest
 from memory.supermemory_layer import SupermemoryLayer, SupermemoryEntry, UserProfile
 
 
+@pytest.fixture(autouse=True)
+def mock_redis_for_supermemory():
+    """Mock Redis connections to prevent hanging on redis:6379."""
+    mock_r = AsyncMock()
+    mock_r.set = AsyncMock()
+    mock_r.get = AsyncMock(return_value=None)
+    mock_r.hset = AsyncMock()
+    mock_r.hgetall = AsyncMock(return_value={})
+    mock_r.close = AsyncMock()
+    mock_r.aclose = AsyncMock()
+    with patch("redis.asyncio.from_url", return_value=mock_r):
+        yield mock_r
+
+
 # ─── SupermemoryLayer unit tests ─────────────────────────────────────────────
 
 

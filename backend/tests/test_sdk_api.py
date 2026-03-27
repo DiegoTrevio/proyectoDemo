@@ -40,7 +40,7 @@ async def setup():
         # Create tenant
         resp = await client.post("/api/v1/keys/tenants", json={
             "name": "Test Corp",
-            "plan": "cloud",
+            "plan": "starter",
         })
         assert resp.status_code == 200
         tenant = resp.json()

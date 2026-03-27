@@ -1,6 +1,7 @@
 """Tests for the AgentOS security layer — LLM Guard, Policy Engine, Middleware."""
 
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from security.llm_guard_config import ScanResult, scan_input, scan_output
 from security.policy_engine import (
@@ -9,6 +10,15 @@ from security.policy_engine import (
     check_policy,
     invalidate_policy_cache,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_db_session_factory():
+    """Mock async_session_factory to avoid real PostgreSQL connections in tests."""
+    mock_factory = AsyncMock()
+    mock_factory.side_effect = Exception("No DB in tests")
+    with patch("security.policy_engine.async_session_factory", mock_factory):
+        yield
 
 
 # ─── LLM Guard: Input Scanning ──────────────────────────────────────────

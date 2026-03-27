@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/v1/keys", tags=["api-keys"])
 
 class CreateTenantRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=256)
-    plan: str = Field(default="free", pattern=r"^(free|cloud|enterprise)$")
+    plan: str = Field(default="free", pattern=r"^(free|starter|pro|team|enterprise)$")
 
 
 class CreateTenantResponse(BaseModel):

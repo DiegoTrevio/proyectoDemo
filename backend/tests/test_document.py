@@ -3,6 +3,7 @@
 import io
 
 import pytest
+from unittest.mock import patch, MagicMock
 
 from tools.file_generator import (
     GeneratedFile,
@@ -139,13 +140,21 @@ class TestDocumentAgent:
 
     def test_model_selection_simple(self):
         from agents.document import DocumentAgent
-        agent = DocumentAgent()
-        assert agent._select_model("simple template for a list") == "agentOS/workhorse-qwen"
+        mock = MagicMock()
+        mock.qwen_api_key = "qwen-key-test"
+        mock.kimi_api_key = "kimi-key-test"
+        with patch("config.model_router.settings", mock):
+            agent = DocumentAgent()
+            assert agent._select_model("simple template for a list") == "agentOS/cheap-qwen"
 
     def test_model_selection_standard(self):
         from agents.document import DocumentAgent
-        agent = DocumentAgent()
-        assert agent._select_model("create a presentation about AI") == "agentOS/workhorse-gemini"
+        mock = MagicMock()
+        mock.qwen_api_key = "qwen-key-test"
+        mock.kimi_api_key = "kimi-key-test"
+        with patch("config.model_router.settings", mock):
+            agent = DocumentAgent()
+            assert agent._select_model("create a presentation about AI") == "agentOS/workhorse-qwen"
 
 
 # ─── Integration ──────────────────────────────────────────────────────────
