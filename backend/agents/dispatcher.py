@@ -3,6 +3,7 @@
 import logging
 
 from agents.base_agent import AgentResult
+from agents.skills.registry import skill_registry
 
 logger = logging.getLogger("agentos.dispatcher")
 
@@ -138,6 +139,17 @@ async def dispatch(agent_name: str, task: dict, context: dict) -> AgentResult:
 
     if isinstance(agent, _StubAgent):
         logger.warning("STUB agent used for '%s' — real agent unavailable", agent_name)
+
+    # Inject matching skill instructions into context
+    goal = task.get("goal", task.get("description", ""))
+    skill_instructions = skill_registry.get_instructions_for_task(
+        goal=goal,
+        agent_name=agent_name,
+        task_type=task.get("task_type", ""),
+    )
+    if skill_instructions:
+        context = {**context, "skill_instructions": skill_instructions}
+        logger.debug("Injected skill instructions for agent=%s (%d chars)", agent_name, len(skill_instructions))
 
     logger.info("Dispatching to agent=%s task=%s", agent_name, task.get("goal", "")[:80])
     return await agent.execute(task, context)

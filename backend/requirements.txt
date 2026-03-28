@@ -41,3 +41,4 @@ fastmcp==2.3.4
 cryptography==44.0.0
 arq>=0.26
 supermemory>=0.1.0
+pyyaml>=6.0

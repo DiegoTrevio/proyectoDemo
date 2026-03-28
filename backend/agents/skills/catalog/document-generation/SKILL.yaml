@@ -1,0 +1,51 @@
+name: document-generation
+description: "Generate professional PDF, DOCX, PPTX, and XLSX documents"
+version: "1.0"
+agents: [document_writer, coder]
+triggers:
+  keywords:
+    - \bPDF\b
+    - \bDOCX\b
+    - \bPPTX?\b
+    - \bXLSX?\b
+    - \bspreadsheet\b
+    - \bpresentation\b
+    - \bslide\s*(?:s|deck)\b
+    - \breport\b.*\bgenerat
+    - \btemplate\b.*\bdocument\b
+    - \bexport\b.*\b(?:PDF|doc|excel)\b
+  task_types: [document, code]
+tools: [file_write]
+complexity_hint: medium
+tags: [documents, generation, export]
+instructions: |
+  When generating documents:
+
+  1. PDF (use reportlab)
+     - Set proper page margins (1 inch default)
+     - Use consistent fonts: Helvetica for body, Helvetica-Bold for headers
+     - Include page numbers and headers/footers
+     - Use Paragraph with styles for proper text wrapping
+
+  2. DOCX (use python-docx)
+     - Start with proper document styles, don't hardcode formatting
+     - Use heading levels (Heading 1-3) for structure
+     - Add table of contents for long documents
+     - Set page orientation/margins before adding content
+
+  3. PPTX (use python-pptx)
+     - Use slide layouts from the template, not blank slides
+     - Keep text minimal: 6 words per line, 6 lines per slide
+     - Use consistent color scheme throughout
+     - Add slide numbers
+
+  4. XLSX (use openpyxl)
+     - Format headers: bold, background color, freeze panes
+     - Auto-size columns based on content
+     - Use named ranges for formulas
+     - Add data validation for input cells
+
+  General rules:
+  - Never use placeholder text — generate real content
+  - Save to local filesystem, return the file path
+  - Include metadata (title, author, creation date)

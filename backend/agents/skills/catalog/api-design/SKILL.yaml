@@ -1,0 +1,51 @@
+name: api-design
+description: "Design and implement REST/GraphQL APIs following best practices"
+version: "1.0"
+agents: [coder, validator]
+triggers:
+  keywords:
+    - \bAPI\b
+    - \bREST\b
+    - \bGraphQL\b
+    - \bendpoint
+    - \broute\b.*\bdesign\b
+    - \bCRUD\b
+    - \bOpenAPI\b
+    - \bSwagger\b
+    - \bwebhook\b
+  task_types: [code]
+tools: [e2b_sandbox]
+complexity_hint: medium
+tags: [api, backend, architecture]
+instructions: |
+  When designing or implementing APIs:
+
+  1. URL DESIGN
+     - Nouns, not verbs: /users, /orders (not /getUsers)
+     - Plural resources: /users/{id}, /users/{id}/orders
+     - Max 3 levels of nesting, then use query params
+     - Use kebab-case: /api-keys, not /apiKeys
+
+  2. HTTP METHODS
+     - GET: Read (idempotent, cacheable)
+     - POST: Create (returns 201 + Location header)
+     - PUT: Full replace (idempotent)
+     - PATCH: Partial update
+     - DELETE: Remove (returns 204)
+
+  3. RESPONSE FORMAT
+     - Consistent envelope: {data, error, meta}
+     - Pagination: cursor-based for large sets, offset for small
+     - Include total count in list responses
+     - Use ISO 8601 for dates, UTC always
+
+  4. ERROR HANDLING
+     - Standard status codes: 400 (validation), 401 (auth), 403 (forbidden), 404, 409 (conflict), 429 (rate limit)
+     - Error body: {error: "code", detail: "human message", field: "which_field"}
+     - Never expose stack traces in production
+
+  5. SECURITY
+     - Validate all input at the boundary
+     - Rate limit by API key and IP
+     - Use HTTPS only, HSTS headers
+     - Auth: Bearer tokens or API keys in headers (never query params)

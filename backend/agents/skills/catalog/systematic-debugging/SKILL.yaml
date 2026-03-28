@@ -1,0 +1,43 @@
+name: systematic-debugging
+description: "Diagnose and fix bugs using systematic isolation and root cause analysis"
+version: "1.0"
+agents: [coder, validator]
+triggers:
+  keywords:
+    - \bdebug
+    - \bfix\s+(?:the|this|a)\s+bug\b
+    - \berror\b.*\bfix\b
+    - \bcrash
+    - \bfailing\s+test
+    - \btraceback\b
+    - \bstack\s*trace\b
+    - \broot\s+cause\b
+  task_types: [code]
+tools: [e2b_sandbox]
+complexity_hint: medium
+tags: [debugging, troubleshooting]
+instructions: |
+  Follow systematic debugging — never guess randomly:
+
+  1. REPRODUCE: Get a reliable reproduction
+     - Identify exact input that triggers the bug
+     - Write a failing test that captures the bug
+
+  2. ISOLATE: Narrow the scope
+     - Binary search: comment out half the code, does it still fail?
+     - Check recent changes (git log, git diff)
+     - Simplify: minimal reproducing example
+
+  3. DIAGNOSE: Find root cause
+     - Read the error message carefully — it usually tells you what's wrong
+     - Add logging/print at key points
+     - Check assumptions: types, values, order of operations
+
+  4. FIX: Targeted repair
+     - Fix the root cause, not symptoms
+     - Run the failing test — confirm it passes
+     - Run the full test suite — confirm no regressions
+
+  5. PREVENT: Add guards
+     - Keep the reproduction test as a regression test
+     - Add input validation if the bug was from unexpected input

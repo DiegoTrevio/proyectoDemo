@@ -18,6 +18,7 @@ from langgraph.graph import END, StateGraph
 
 from agents.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerState
 from agents.dispatcher import dispatch
+from agents.skills.registry import skill_registry
 from config.model_router import ORCHESTRATOR, select_model
 from config.settings import settings
 
@@ -159,9 +160,15 @@ async def classify_node(state: AgentState) -> dict:
     await _publish(task_id, "thought", f"Classifying task: {goal[:100]}...")
 
     try:
+        # Enrich classify prompt with skill hints
+        skill_hints = skill_registry.get_skill_hints_for_classification()
+        classify_prompt = _CLASSIFY_PROMPT.format(goal=goal)
+        if skill_hints:
+            classify_prompt += f"\n\n{skill_hints}"
+
         response = await _call_orchestrator_llm([
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": _CLASSIFY_PROMPT.format(goal=goal)},
+            {"role": "user", "content": classify_prompt},
         ], max_tokens=256)
 
         result = _parse_json(response)
@@ -230,6 +237,12 @@ async def plan_node(state: AgentState) -> dict:
             logger.debug("DeerFlow routing check failed: %s", e)
 
     context_section = ""
+
+    # Inject skill-based agent suggestions
+    suggested_agents = skill_registry.suggest_agents_for_goal(goal, state["task_type"])
+    if suggested_agents:
+        context_section += f"\nSkill-recommended agents for this task: {', '.join(suggested_agents)}\n"
+
     # Inject memory context
     mem_ctx = state.get("memory_context", {})
     combined_memory = mem_ctx.get("combined", "") if isinstance(mem_ctx, dict) else ""

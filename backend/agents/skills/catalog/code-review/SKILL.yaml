@@ -1,0 +1,41 @@
+name: code-review
+description: "Review code for correctness, security, performance, and maintainability"
+version: "1.0"
+agents: [validator, coder]
+triggers:
+  keywords:
+    - \breview\b.*\bcode\b
+    - \bcode\s+review\b
+    - \bPR\s+review\b
+    - \bpull\s+request\b.*\breview\b
+    - \baudit\b.*\bcode\b
+    - \bcode\s+quality\b
+  task_types: [code]
+tools: []
+complexity_hint: simple
+tags: [quality, review]
+instructions: |
+  Review code across these dimensions:
+
+  1. CORRECTNESS: Does it do what it claims?
+     - Edge cases handled?
+     - Error paths covered?
+     - Off-by-one errors?
+
+  2. SECURITY: OWASP top 10 check
+     - SQL injection, XSS, command injection
+     - Secrets hardcoded? Auth bypasses?
+     - Input validation at boundaries
+
+  3. PERFORMANCE: Obvious bottlenecks
+     - N+1 queries, unbounded loops
+     - Memory leaks, missing cleanup
+     - Unnecessary allocations in hot paths
+
+  4. MAINTAINABILITY: Future developer perspective
+     - Clear naming, single responsibility
+     - Unnecessary complexity or premature abstraction
+     - Missing error messages for debugging
+
+  Be specific: cite line numbers, show the problem, suggest the fix.
+  Prioritize: security > correctness > performance > style.

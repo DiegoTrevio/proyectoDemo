@@ -1,0 +1,52 @@
+name: security-audit
+description: "Audit code and infrastructure for security vulnerabilities"
+version: "1.0"
+agents: [validator, coder, researcher]
+triggers:
+  keywords:
+    - \bsecurity\b.*\baudit\b
+    - \bvulnerabilit
+    - \bOWASP\b
+    - \bpentest\b
+    - \bsecurity\s+review\b
+    - \bharden
+    - \bCVE\b
+    - \binjection\b
+    - \bXSS\b
+    - \bCSRF\b
+    - \bauthenticat
+  task_types: [code, research]
+tools: [e2b_sandbox]
+complexity_hint: complex
+tags: [security, audit, compliance]
+instructions: |
+  When performing security audits:
+
+  1. INPUT VALIDATION (OWASP A03)
+     - SQL injection: parameterized queries, never string concat
+     - XSS: escape output, Content-Security-Policy headers
+     - Command injection: never pass user input to shell
+     - Path traversal: validate and normalize file paths
+     - SSRF: whitelist allowed hosts for outbound requests
+
+  2. AUTHENTICATION & ACCESS (OWASP A01, A07)
+     - Passwords: bcrypt/argon2, never MD5/SHA1
+     - Sessions: secure, httpOnly, sameSite cookies
+     - API keys: hashed storage, rotation support
+     - RBAC: check permissions at every endpoint, not just UI
+
+  3. DATA PROTECTION (OWASP A02)
+     - Secrets: env vars or vault, never in code/git
+     - PII: encrypt at rest, minimize collection
+     - Logs: never log passwords, tokens, or PII
+     - Transport: TLS 1.2+ only, HSTS
+
+  4. DEPENDENCIES (OWASP A06)
+     - Check for known CVEs (npm audit, pip-audit, safety)
+     - Pin dependency versions
+     - Review transitive dependencies
+
+  5. REPORT FORMAT
+     - Severity: Critical / High / Medium / Low / Info
+     - Each finding: description, location, impact, remediation
+     - Prioritize by exploitability and impact

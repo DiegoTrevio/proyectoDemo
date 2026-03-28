@@ -1,0 +1,47 @@
+name: data-visualization
+description: "Generate charts, dashboards, and data visualizations from data"
+version: "1.0"
+agents: [coder, document_writer]
+triggers:
+  keywords:
+    - \bchart\b
+    - \bgraph\b
+    - \bdashboard\b
+    - \bvisuali[sz]
+    - \bplot\b
+    - \bhistogram\b
+    - \bheatmap\b
+    - \bbar\s+chart\b
+    - \bline\s+chart\b
+    - \bpie\s+chart\b
+    - \bscatter\b
+  task_types: [code, document]
+tools: [e2b_sandbox, file_write]
+complexity_hint: medium
+tags: [data, visualization, charts]
+instructions: |
+  When creating data visualizations:
+
+  1. UNDERSTAND the data first
+     - What type? Time series, categorical, distribution, comparison
+     - How many data points? Affects chart choice
+     - What story should the visualization tell?
+
+  2. SELECT the right chart type
+     - Comparison: Bar chart (few items), grouped bar (categories)
+     - Trend over time: Line chart, area chart
+     - Distribution: Histogram, box plot, violin
+     - Correlation: Scatter plot, heatmap
+     - Composition: Pie chart (max 5 slices), stacked bar, treemap
+     - Geographic: Choropleth, bubble map
+
+  3. BUILD with the right tool
+     - Static (reports/PDFs): matplotlib, seaborn
+     - Interactive (web): plotly, D3.js, Chart.js
+     - Dashboards: Streamlit, Dash, Grafana
+
+  4. DESIGN for clarity
+     - Always label axes and include units
+     - Use colorblind-friendly palettes (viridis, cividis)
+     - Title should state the insight, not describe the chart
+     - Remove chart junk: unnecessary gridlines, 3D effects, decoration

@@ -1,0 +1,35 @@
+name: test-driven-development
+description: "Write tests before implementation using Red/Green/Refactor cycle"
+version: "1.0"
+agents: [coder, validator]
+triggers:
+  keywords:
+    - \bTDD\b
+    - \btest.driven\b
+    - \bwrite\s+tests?\s+first\b
+    - \bred.green.refactor\b
+    - \btest\s+coverage\b
+    - \bunit\s+test
+  task_types: [code]
+tools: [e2b_sandbox]
+complexity_hint: medium
+tags: [testing, quality, methodology]
+instructions: |
+  Follow the Red/Green/Refactor cycle strictly:
+
+  1. RED: Write a failing test first
+     - Name tests descriptively: test_returns_empty_list_when_no_results
+     - One assertion per test
+     - Run the test — confirm it FAILS
+
+  2. GREEN: Write minimal code to pass
+     - Absolute minimum to make the test pass
+     - No extra features, no optimization
+     - Run the test — confirm it PASSES
+
+  3. REFACTOR: Clean up with safety net
+     - Remove duplication, improve naming
+     - Run tests again — confirm they still PASS
+
+  Test edge cases: empty input, None, boundary values, error cases.
+  Use fixtures for common setup. Mock external dependencies.

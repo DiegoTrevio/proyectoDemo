@@ -1,0 +1,48 @@
+name: web-scraping
+description: "Extract structured data from websites using browser automation or HTTP"
+version: "1.0"
+agents: [browser, researcher, coder]
+triggers:
+  keywords:
+    - \bscrap[ei]
+    - \bcrawl\b
+    - \bextract\b.*\bdata\b.*\bweb
+    - \bweb\s+data\b
+    - \bparse\b.*\bHTML\b
+    - \bscraping\b
+    - \bspider\b
+  task_types: [browser, code, research]
+tools: [browser_use, steel_browser, e2b_sandbox]
+complexity_hint: medium
+tags: [scraping, data, web]
+instructions: |
+  When scraping websites:
+
+  1. CHOOSE the right approach
+     - Static HTML: httpx + BeautifulSoup (fast, low resource)
+     - JavaScript-rendered: Playwright/Steel browser (headful)
+     - API available: Always prefer official APIs over scraping
+     - Anti-bot protected: Steel browser with stealth mode
+
+  2. BE RESPECTFUL
+     - Check robots.txt first
+     - Rate limit requests (1-2 req/sec max)
+     - Set a descriptive User-Agent
+     - Don't scrape personal data without consent
+
+  3. EXTRACT RELIABLY
+     - Use CSS selectors over XPath (more readable)
+     - Target data attributes and semantic HTML over class names
+     - Handle pagination: check for "next" links or page params
+     - Validate extracted data: check types, non-empty, expected format
+
+  4. STRUCTURE OUTPUT
+     - Return clean, structured data (JSON, CSV)
+     - Normalize: strip whitespace, consistent date formats
+     - Deduplicate results
+     - Include source URLs for provenance
+
+  5. HANDLE FAILURES
+     - Retry on 429/503 with exponential backoff
+     - Detect and handle CAPTCHAs gracefully (report, don't bypass)
+     - Save partial results — don't lose data on late failures
