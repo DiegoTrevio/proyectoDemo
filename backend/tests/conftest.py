@@ -61,6 +61,11 @@ async def client(test_engine):
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_auth] = _mock_require_auth
 
+    # Mock arq pool so tasks are "enqueued" instead of running inline
+    mock_arq = AsyncMock()
+    mock_arq.enqueue_job = AsyncMock()
+    app.state.arq_pool = mock_arq
+
     # Mock Redis so task creation/cancellation doesn't need a real Redis server
     mock_r = AsyncMock()
     mock_r.set = AsyncMock()
@@ -75,6 +80,7 @@ async def client(test_engine):
             yield ac
 
     app.dependency_overrides.clear()
+    del app.state.arq_pool
 
 
 @pytest.fixture

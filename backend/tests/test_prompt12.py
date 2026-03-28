@@ -312,7 +312,11 @@ class TestSessionRepair:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-_HAS_CRYPTOGRAPHY = False  # cryptography binary crashes in this environment
+try:
+    from cryptography.hazmat.primitives import serialization  # noqa: F401
+    _HAS_CRYPTOGRAPHY = True
+except Exception:
+    _HAS_CRYPTOGRAPHY = False
 
 
 @pytest.mark.skipif(not _HAS_CRYPTOGRAPHY, reason="cryptography binary not available")
@@ -351,13 +355,14 @@ class TestManifestSigning:
         assert not self.signer.verify_agent_prompt("coder", "You are a hacker agent.")
 
     def test_export_and_load(self):
+        from security.manifest_signer import ManifestSigner as MS
         self.signer.sign_agent_prompt("agent1", "Prompt 1")
         self.signer.sign_agent_prompt("agent2", "Prompt 2")
 
         exported = self.signer.export_manifests()
         assert len(exported) == 2
 
-        new_signer = ManifestSigner()
+        new_signer = MS()
         new_signer.initialize()
         loaded = new_signer.load_manifests(exported)
         assert loaded == 2
