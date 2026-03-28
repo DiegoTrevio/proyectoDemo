@@ -153,7 +153,10 @@ class SkillRegistry:
             type_bonus = 0.2 if task_type and task_type in skill.task_types else 0.0
 
             if matched or type_bonus > 0:
-                keyword_score = min(len(matched) / max(len(skill.triggers), 1) * 2, 1.0)
+                # Each match is worth 0.33 — a single match gives 0.33,
+                # two matches give 0.67, three or more give 1.0.
+                # This avoids penalizing skills with many triggers.
+                keyword_score = min(len(matched) * 0.33, 1.0)
                 confidence = min(keyword_score + type_bonus, 1.0)
                 matches.append(SkillMatch(
                     skill=skill,

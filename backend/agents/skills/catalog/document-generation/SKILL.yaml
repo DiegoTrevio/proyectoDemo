@@ -11,9 +11,9 @@ triggers:
     - \bspreadsheet\b
     - \bpresentation\b
     - \bslide\s*(?:s|deck)\b
-    - \breport\b.*\bgenerat
-    - \btemplate\b.*\bdocument\b
-    - \bexport\b.*\b(?:PDF|doc|excel)\b
+    - \b(?:report|generat)\b.*\b(?:report|generat)
+    - \b(?:template|document)\b.*\b(?:template|document)\b
+    - \b(?:export|PDF|doc|excel)\b.*\b(?:export|PDF|doc|excel)\b
   task_types: [document, code]
 tools: [file_write]
 complexity_hint: medium

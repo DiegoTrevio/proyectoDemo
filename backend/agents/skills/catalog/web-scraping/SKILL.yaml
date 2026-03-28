@@ -5,11 +5,11 @@ agents: [browser, researcher, coder]
 triggers:
   keywords:
     - \bscrap[ei]
+    - \bscraping\b
     - \bcrawl\b
-    - \bextract\b.*\bdata\b.*\bweb
+    - \bextract\b.*\bdata\b
     - \bweb\s+data\b
     - \bparse\b.*\bHTML\b
-    - \bscraping\b
     - \bspider\b
   task_types: [browser, code, research]
 tools: [browser_use, steel_browser, e2b_sandbox]
