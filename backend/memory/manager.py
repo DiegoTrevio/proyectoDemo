@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from memory.graphiti_layer import Fact, graphiti
 from memory.mem0_layer import Memory, mem0
 from memory.openviking_layer import openviking
+from memory.project_context import project_context
 from memory.supermemory_layer import supermemory_client
 
 logger = logging.getLogger("agentos.memory.manager")
@@ -43,6 +44,7 @@ async def gather_context(
     """
     context = {
         "openviking": "",
+        "project_context": "",
         "supermemory_memories": [],
         "mem0_memories": [],  # Kept for backward compat (empty if Supermemory active)
         "graphiti_facts": [],
@@ -52,6 +54,16 @@ async def gather_context(
 
     parts = []
     token_budget = max_tokens
+
+    # ── Layer 0.5: Project Context (structured project knowledge) ─────
+    try:
+        pc = project_context.get_context_for_task(goal, max_tokens=min(300, token_budget))
+        if pc:
+            context["project_context"] = pc
+            parts.append(f"[Project Context]\n{pc}")
+            token_budget -= len(pc) // 4
+    except Exception as e:
+        logger.warning("Project context retrieval failed: %s", e)
 
     # ── Layer 0: OpenViking L0 (quick context) ────────────────────────
     try:
@@ -152,7 +164,7 @@ async def save_learnings(
     Returns:
         Dict with save status per layer.
     """
-    status = {"openviking": False, "supermemory": False, "mem0": False, "graphiti": False, "redis": False}
+    status = {"openviking": False, "project_context": False, "supermemory": False, "mem0": False, "graphiti": False, "redis": False}
     now = datetime.now(timezone.utc)
 
     # ── Layer 0: OpenViking — store as resource ───────────────────────
@@ -177,6 +189,20 @@ async def save_learnings(
         status["openviking"] = True
     except Exception as e:
         logger.warning("OpenViking save failed: %s", e)
+
+    # ── Layer 0.5: Project Context — update decisions if facts provided ──
+    if facts:
+        decision_facts = [f for f in facts if f.get("predicate") in ("decided", "chose", "adopted", "deprecated")]
+        if decision_facts:
+            try:
+                existing = project_context.get_section("decisions", tier=2) or ""
+                new_entries = "\n".join(
+                    f"- {f['subject']} {f['predicate']} {f.get('object', '')}" for f in decision_facts
+                )
+                project_context.store_section("decisions", f"{existing}\n{new_entries}".strip())
+                status["project_context"] = True
+            except Exception as e:
+                logger.warning("Project context decisions update failed: %s", e)
 
     # ── Layer 1: Supermemory — primary user/agent memory ──────────────
     if supermemory_client.available:
@@ -259,6 +285,9 @@ async def save_learnings(
 
 def get_memory_stats() -> dict:
     """Get statistics across all memory layers."""
+    # Project context drift check
+    drift = project_context.check_drift()
+
     return {
         "openviking": {
             "available": openviking.available,
@@ -268,6 +297,12 @@ def get_memory_stats() -> dict:
                 "user_memories": len(openviking.list_paths("viking://user/memories/")),
                 "agent_memories": len(openviking.list_paths("viking://agent/memories/")),
             },
+        },
+        "project_context": {
+            "sections": list(project_context.get_all_sections(tier=0).keys()),
+            "drift_score": drift.score,
+            "drift_healthy": drift.healthy,
+            "drift_issues": len(drift.issues),
         },
         "supermemory": {
             "available": supermemory_client.available,

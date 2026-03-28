@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.middleware.rate_limiter import RateLimitMiddleware
-from api.routes import agents, api_keys, billing, dashboard, ingest, memory, stream, tasks
+from api.routes import agents, api_keys, billing, dashboard, ingest, memory, project, stream, tasks
 from integrations.openclaw_bridge import create_openclaw_router
 from api.websocket import router as ws_router
 from config.langfuse_client import init_langfuse
@@ -199,6 +199,7 @@ app.include_router(ws_router)
 app.include_router(ingest.router)
 app.include_router(dashboard.router)
 app.include_router(api_keys.router)
+app.include_router(project.router)
 app.include_router(create_openclaw_router())
 
 

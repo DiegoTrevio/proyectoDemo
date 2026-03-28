@@ -96,6 +96,33 @@ class MemoryEntry(BaseModel):
     created_at: str
 
 
+# ─── Project Context ──────────────────────────────────────────────────────
+
+class ProjectSectionStore(BaseModel):
+    section: str = Field(..., pattern=r"^(architecture|stack|conventions|decisions|setup)$")
+    content: str = Field(..., min_length=1)
+    metadata: dict | None = None
+
+
+class ProjectSectionResponse(BaseModel):
+    section: str
+    content: str
+    metadata: dict
+
+
+class ProjectDriftResponse(BaseModel):
+    score: int
+    healthy: bool
+    issues: list[dict]
+    checked_at: str
+
+
+class ProjectScaffoldResponse(BaseModel):
+    project_id: str
+    sections: dict
+    drift: dict
+
+
 # ─── Generic ──────────────────────────────────────────────────────────────
 
 class ErrorResponse(BaseModel):
