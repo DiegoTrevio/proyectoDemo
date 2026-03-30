@@ -29,6 +29,20 @@ def _validate_environment() -> list[str]:
     """Validate required environment variables at startup. Returns list of warnings."""
     warnings = []
 
+    # Critical: LLM keys — without these, no agent can work
+    if not settings.litellm_master_key:
+        warnings.append("LITELLM_MASTER_KEY not set — ALL LLM calls will fail (401)")
+    if not settings.anthropic_api_key and not settings.google_api_key:
+        warnings.append("No LLM API keys configured (ANTHROPIC_API_KEY / GOOGLE_API_KEY) — agents cannot run")
+
+    # Important: search — researcher agent needs at least one
+    if not any([settings.tavily_api_key, settings.exa_api_key, settings.perplexity_api_key]):
+        warnings.append("No search API keys configured (TAVILY/EXA/PERPLEXITY) — researcher agent will return empty results")
+
+    # Important: code execution
+    if not settings.e2b_api_key:
+        warnings.append("E2B_API_KEY not set — coder agent cannot execute code in sandbox")
+
     # Critical: database must be configured
     if "localhost" in settings.database_url or "postgres:5432" in settings.database_url:
         if os.environ.get("TESTING") != "1":

@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     backend_url: str = "http://localhost:8000"
     ollama_api_base: str = "http://localhost:11434"
+    litellm_base_url: str = "http://litellm:4000"
 
     # Security
     manifest_signing_key: str = ""

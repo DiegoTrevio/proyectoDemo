@@ -32,7 +32,7 @@ FACTS = "agentOS/facts"
 IMAGES = "agentOS/images"
 ON_PREMISE = "agentOS/on-premise"
 
-LITELLM_BASE_URL = "http://litellm:4000"
+LITELLM_BASE_URL = settings.litellm_base_url
 
 
 @dataclass

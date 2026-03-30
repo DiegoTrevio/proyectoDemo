@@ -62,8 +62,8 @@ class TestCodeExecutor:
         executor = CodeExecutor()
         executor.api_key = ""
         result = await executor.execute("print('hello')")
-        assert result.exit_code == 0
-        assert "not configured" in result.stdout.lower() or result.stdout != ""
+        assert result.exit_code == 1
+        assert "E2B_API_KEY" in result.stderr
 
 
 # ─── CoderAgent ───────────────────────────────────────────────────────────

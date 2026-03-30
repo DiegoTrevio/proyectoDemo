@@ -247,7 +247,7 @@ class BrowserTool:
             # Configure LLM to point at LiteLLM proxy
             llm = ChatOpenAI(
                 model=model,
-                base_url="http://litellm:4000/v1",
+                base_url=f"{settings.litellm_base_url}/v1",
                 api_key=settings.litellm_master_key,
                 temperature=0,
             )

@@ -64,11 +64,11 @@ class CodeExecutor:
             ExecutionResult with stdout, stderr, files, and exit code.
         """
         if not self.api_key:
-            logger.warning("E2B API key not configured — returning mock result")
+            logger.warning("E2B API key not configured — code will NOT be executed")
             return ExecutionResult(
-                stdout="[E2B not configured — sandbox execution skipped]",
-                stderr="",
-                exit_code=0,
+                stdout="",
+                stderr="E2B_API_KEY not configured. Code was NOT executed. Set E2B_API_KEY in .env to enable sandbox execution.",
+                exit_code=1,
             )
 
         sandbox = None

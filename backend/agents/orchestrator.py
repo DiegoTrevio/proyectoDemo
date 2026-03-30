@@ -105,17 +105,20 @@ Iteration: {iteration}/{max_iterations}"""
 
 async def _publish(task_id: str, event_type: str, content: str, agent: str = "orchestrator"):
     """Publish an SSE event to the task's Redis channel."""
-    r = aioredis.from_url(settings.redis_url)
     try:
-        payload = json.dumps({
-            "type": event_type,
-            "content": content,
-            "agent": agent,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-        await r.publish(f"task:{task_id}:events", payload)
-    finally:
-        await r.close()
+        r = aioredis.from_url(settings.redis_url)
+        try:
+            payload = json.dumps({
+                "type": event_type,
+                "content": content,
+                "agent": agent,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+            await r.publish(f"task:{task_id}:events", payload)
+        finally:
+            await r.close()
+    except Exception:
+        logger.debug("Redis unavailable — SSE event for task %s not published", task_id)
 
 
 # ─── LLM call helper (uses LiteLLM via HTTP) ─────────────────────────────
@@ -124,7 +127,7 @@ async def _call_orchestrator_llm(messages: list[dict], max_tokens: int = 4096) -
     """Call the orchestrator model via LiteLLM proxy."""
     import httpx
 
-    async with httpx.AsyncClient(base_url="http://litellm:4000", timeout=120) as client:
+    async with httpx.AsyncClient(base_url=settings.litellm_base_url, timeout=120) as client:
         resp = await client.post(
             "/chat/completions",
             json={
