@@ -11,9 +11,29 @@ import {
   ListTodo,
   Activity,
   DollarSign,
+  Bot,
+  Heart,
+  Zap,
+  Settings,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 import { TaskInput } from "@/components/TaskInput";
-import { createTask, listTasks, loadApiKey, setApiKey, clearApiKey, hasSession, signOut, ApiError, type Task } from "@/lib/api";
+import {
+  createTask,
+  listTasks,
+  loadApiKey,
+  setApiKey,
+  clearApiKey,
+  hasSession,
+  signOut,
+  ApiError,
+  getAgentsHealth,
+  listSkills,
+  reloadSkills,
+  type Task,
+} from "@/lib/api";
 
 const STATUS_CONFIG: Record<
   string,
@@ -35,8 +55,11 @@ export default function Dashboard() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [authMethod, setAuthMethod] = useState<"session" | "apikey" | null>(null);
+  const [showTaskInput, setShowTaskInput] = useState(false);
+  const [agentHealth, setAgentHealth] = useState<Record<string, string>>({});
+  const [skillCount, setSkillCount] = useState(0);
+  const [reloading, setReloading] = useState(false);
 
-  // Check authentication: SuperTokens session first, then API key fallback
   useEffect(() => {
     async function checkAuth() {
       if (await hasSession()) {
@@ -61,7 +84,7 @@ export default function Dashboard() {
       setAuthMethod("apikey");
       setNeedsAuth(false);
       setError(null);
-      fetchTasks();
+      fetchData();
     }
   };
 
@@ -75,22 +98,22 @@ export default function Dashboard() {
     setTasks([]);
   };
 
-  const fetchTasks = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await listTasks(1, 20);
-      setTasks(data.tasks || []);
+      const [taskData, health, skills] = await Promise.all([
+        listTasks(1, 20).catch(() => ({ tasks: [], total: 0 })),
+        getAgentsHealth().catch(() => ({})),
+        listSkills().catch(() => []),
+      ]);
+      setTasks(taskData.tasks || []);
+      setAgentHealth(health);
+      setSkillCount(skills.length);
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.isUnauthorized) {
-          setNeedsAuth(true);
-          setError("API key is invalid or expired. Please enter a valid key.");
-        } else if (err.isRateLimited) {
-          setError("Rate limit exceeded. Please wait a moment and try again.");
-        } else {
-          setError(`API error: ${err.message}`);
-        }
+      if (err instanceof ApiError && err.isUnauthorized) {
+        setNeedsAuth(true);
+        setError("API key is invalid or expired.");
       } else {
         setError("Cannot connect to AgentOS backend. Is the server running?");
       }
@@ -100,10 +123,8 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!needsAuth) {
-      fetchTasks();
-    }
-  }, [fetchTasks, needsAuth]);
+    if (!needsAuth) fetchData();
+  }, [fetchData, needsAuth]);
 
   const handleSubmit = async (goal: string, model: string, budgetLimit: number) => {
     setSubmitting(true);
@@ -116,22 +137,30 @@ export default function Dashboard() {
       });
       router.push(`/task/${task.id}`);
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.isUnauthorized) {
-          setNeedsAuth(true);
-          setError("Session expired. Please log in again.");
-        } else {
-          setError(`Failed to create task: ${err.message}`);
-        }
+      if (err instanceof ApiError && err.isUnauthorized) {
+        setNeedsAuth(true);
+        setError("Session expired. Please log in again.");
       } else {
-        setError("Cannot connect to AgentOS backend. Is the server running?");
+        setError("Failed to create task.");
       }
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ── Auth screen ──
+  const handleReloadSkills = async () => {
+    setReloading(true);
+    try {
+      const result = await reloadSkills();
+      setSkillCount(result.loaded);
+    } catch {
+      // silent
+    } finally {
+      setReloading(false);
+    }
+  };
+
+  // Auth screen
   if (needsAuth) {
     return (
       <div className="max-w-md mx-auto px-6 py-24">
@@ -145,22 +174,17 @@ export default function Dashboard() {
           </div>
         )}
         <div className="space-y-4">
-          {/* SuperTokens login */}
           <a
             href="/auth"
             className="block w-full px-4 py-3 rounded-xl bg-accent-blue text-white text-[13px] font-medium text-center hover:bg-accent-blue/90 transition-colors"
           >
             Sign in with Email
           </a>
-
-          {/* Divider */}
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-border" />
             <span className="text-[11px] text-text-tertiary uppercase tracking-wider">or use API key</span>
             <div className="flex-1 h-px bg-border" />
           </div>
-
-          {/* API key fallback */}
           <input
             type="password"
             value={apiKeyInput}
@@ -181,6 +205,11 @@ export default function Dashboard() {
     );
   }
 
+  const agentNames = Object.keys(agentHealth);
+  const agentsOnline = agentNames.filter(
+    (n) => agentHealth[n] === "real" || agentHealth[n] === "available"
+  ).length;
+
   const stats = {
     total: tasks.length,
     running: tasks.filter((t) => t.status === "running").length,
@@ -188,7 +217,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="max-w-[1400px] mx-auto px-6 py-12">
+    <div className="max-w-[1400px] mx-auto px-6 py-8">
       {/* Error banner */}
       {error && (
         <motion.div
@@ -203,69 +232,166 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* Hero section */}
-      <div className="text-center mb-12">
-        <motion.h1
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-3xl font-bold tracking-tight mb-3"
-        >
-          What do you want to build?
-        </motion.h1>
-        <motion.p
-          initial={{ opacity: 0, y: -5 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="text-[15px] text-text-secondary max-w-lg mx-auto"
-        >
-          Describe your task and AgentOS will orchestrate the right AI agents to get it done.
-        </motion.p>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="text-[13px] text-text-secondary mt-0.5">Operations overview</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTaskInput(!showTaskInput)}
+            className="px-4 py-2 text-[13px] font-medium rounded-lg bg-accent-blue text-white hover:bg-accent-blue/90 transition-colors flex items-center gap-1.5"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            New Task
+            {showTaskInput ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+          <button
+            onClick={handleLogout}
+            className="px-3 py-2 text-[12px] text-text-tertiary hover:text-text-secondary transition-colors"
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
-      {/* Task input */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="mb-16"
-      >
-        <TaskInput onSubmit={handleSubmit} loading={submitting} />
-      </motion.div>
+      {/* Task Input (collapsible) */}
+      {showTaskInput && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className="mb-6"
+        >
+          <TaskInput onSubmit={handleSubmit} loading={submitting} />
+        </motion.div>
+      )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {[
           { icon: ListTodo, label: "Total Tasks", value: stats.total.toString(), color: "text-accent-blue" },
           { icon: Activity, label: "Running", value: stats.running.toString(), color: "text-accent-green" },
-          { icon: DollarSign, label: "Total Cost", value: `$${stats.totalCost.toFixed(2)}`, color: "text-accent-yellow" },
+          { icon: DollarSign, label: "Cost", value: `$${stats.totalCost.toFixed(2)}`, color: "text-accent-yellow" },
+          {
+            icon: Bot,
+            label: "Agents",
+            value: agentNames.length > 0 ? `${agentsOnline}/${agentNames.length}` : "-",
+            color: agentsOnline === agentNames.length ? "text-accent-green" : "text-accent-yellow",
+          },
         ].map((stat) => (
-          <div
+          <motion.div
             key={stat.label}
-            className="rounded-xl border border-border bg-bg-card p-5"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-border bg-bg-card p-4"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <stat.icon className={`w-4 h-4 ${stat.color}`} />
-              <span className="text-[11px] text-text-tertiary uppercase tracking-wider font-medium">
+            <div className="flex items-center gap-2 mb-1.5">
+              <stat.icon className={`w-3.5 h-3.5 ${stat.color}`} />
+              <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
                 {stat.label}
               </span>
             </div>
-            <span className="text-2xl font-semibold font-mono">{stat.value}</span>
-          </div>
+            <span className="text-xl font-semibold font-mono">{stat.value}</span>
+          </motion.div>
         ))}
       </div>
 
-      {/* Recent tasks */}
+      {/* Two-column: Health + Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* System Health */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="lg:col-span-2 rounded-xl border border-border bg-bg-card p-5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Heart className="w-4 h-4 text-accent-green" />
+            <h2 className="text-[13px] font-semibold">System Health</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {agentNames.length > 0 ? (
+              agentNames.map((name) => {
+                const status = agentHealth[name];
+                const isUp = status === "real" || status === "available";
+                return (
+                  <div
+                    key={name}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-hover"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${isUp ? "bg-accent-green" : "bg-accent-red"}`} />
+                    <span className="text-[12px] capitalize truncate">{name.replace(/_/g, " ")}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="text-[12px] text-text-tertiary col-span-3">Loading health data...</p>
+            )}
+          </div>
+        </motion.div>
+
+        {/* Quick Actions */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="rounded-xl border border-border bg-bg-card p-5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-4 h-4 text-accent-yellow" />
+            <h2 className="text-[13px] font-semibold">Quick Actions</h2>
+          </div>
+          <div className="space-y-1.5">
+            <button
+              onClick={() => setShowTaskInput(true)}
+              className="w-full text-left px-3 py-2 rounded-lg text-[12px] hover:bg-bg-hover transition-colors flex items-center gap-2"
+            >
+              <Zap className="w-3 h-3 text-accent-blue" /> Create Task
+            </button>
+            <button
+              onClick={() => router.push("/config")}
+              className="w-full text-left px-3 py-2 rounded-lg text-[12px] hover:bg-bg-hover transition-colors flex items-center gap-2"
+            >
+              <Settings className="w-3 h-3 text-accent-purple" /> Manage Skills
+              <span className="ml-auto text-[10px] text-text-tertiary font-mono">{skillCount}</span>
+            </button>
+            <button
+              onClick={() => router.push("/agents")}
+              className="w-full text-left px-3 py-2 rounded-lg text-[12px] hover:bg-bg-hover transition-colors flex items-center gap-2"
+            >
+              <Bot className="w-3 h-3 text-accent-green" /> View Agents
+            </button>
+            <button
+              onClick={handleReloadSkills}
+              disabled={reloading}
+              className="w-full text-left px-3 py-2 rounded-lg text-[12px] hover:bg-bg-hover transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 text-accent-yellow ${reloading ? "animate-spin" : ""}`} /> Reload Skills
+            </button>
+            <button
+              onClick={fetchData}
+              className="w-full text-left px-3 py-2 rounded-lg text-[12px] hover:bg-bg-hover transition-colors flex items-center gap-2"
+            >
+              <RefreshCw className="w-3 h-3 text-text-tertiary" /> Refresh
+            </button>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Recent Tasks */}
       <div>
-        <h2 className="text-[13px] font-semibold mb-4">Recent Tasks</h2>
+        <h2 className="text-[13px] font-semibold mb-3">Recent Tasks</h2>
         {loading ? (
           <div className="flex items-center justify-center py-12 text-text-tertiary">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            <span className="text-[13px]">Loading tasks...</span>
+            <span className="text-[13px]">Loading...</span>
           </div>
         ) : tasks.length === 0 ? (
-          <div className="text-center py-16 text-text-tertiary">
+          <div className="text-center py-12 text-text-tertiary">
             <ListTodo className="w-8 h-8 mx-auto mb-3 opacity-30" />
-            <p className="text-[13px]">No tasks yet. Create one above.</p>
+            <p className="text-[13px]">No tasks yet. Click &quot;New Task&quot; to create one.</p>
           </div>
         ) : (
           <div className="space-y-2">

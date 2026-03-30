@@ -48,6 +48,7 @@ function Header() {
             {[
               { label: "Dashboard", href: "/" },
               { label: "Agents", href: "/agents" },
+              { label: "Config", href: "/config" },
               { label: "Billing", href: "/billing" },
               { label: "Settings", href: "/settings" },
             ].map((item) => (

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 
 export default function AuthPage() {
   const router = useRouter();
-  const [AuthUI, setAuthUI] = useState<React.ComponentType | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [AuthUI, setAuthUI] = useState<React.ComponentType<any> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -14,10 +15,11 @@ export default function AuthPage() {
         const { initSuperTokens } = await import("@/lib/supertokens");
         initSuperTokens();
 
-        const { SignInAndUp } = await import(
+        const { AuthPage } = await import("supertokens-auth-react/ui");
+        const { EmailPasswordPreBuiltUI } = await import(
           "supertokens-auth-react/recipe/emailpassword/prebuiltui"
         );
-        setAuthUI(() => SignInAndUp);
+        setAuthUI(() => () => AuthPage({ preBuiltUIList: [EmailPasswordPreBuiltUI] }));
       } catch {
         setError(
           "Authentication service unavailable. Check that SuperTokens is running."

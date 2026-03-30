@@ -250,6 +250,121 @@ export async function getAgentsHealth(): Promise<Record<string, string>> {
   return request<Record<string, string>>("/agents/health");
 }
 
+export async function getDeerflowStatus(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/agents/deerflow/status");
+}
+
+// ── Skills ──────────────────────────────────────────────────────────────
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  version: string;
+  agents: string[];
+  complexity_hint: string;
+  tags: string[];
+  trigger_count: number;
+}
+
+export interface SkillDetail {
+  name: string;
+  description: string;
+  version: string;
+  agents: string[];
+  triggers: string[];
+  task_types: string[];
+  instructions: string;
+  tools: string[];
+  complexity_hint: string;
+  tags: string[];
+}
+
+export interface SkillMatchResult {
+  skill: string;
+  confidence: number;
+  matched_triggers: string[];
+  agents: string[];
+  description: string;
+}
+
+export interface SkillTestResult {
+  valid: boolean;
+  errors: { field: string; message: string }[];
+  warnings: { field: string; message: string }[];
+  matches: { goal: string; matched: boolean; confidence: number; matched_triggers: string[] }[];
+}
+
+export async function listSkills(): Promise<SkillInfo[]> {
+  return request<SkillInfo[]>("/skills");
+}
+
+export async function getSkill(name: string): Promise<SkillDetail> {
+  return request<SkillDetail>(`/skills/${name}`);
+}
+
+export async function createSkill(data: Record<string, unknown>): Promise<{ status: string; skill: string; warnings: { field: string; message: string }[] }> {
+  return request("/skills", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function deleteSkill(name: string): Promise<void> {
+  await request(`/skills/${name}`, { method: "DELETE" });
+}
+
+export async function testSkill(skill: Record<string, unknown>, sampleGoals: string[]): Promise<SkillTestResult> {
+  return request<SkillTestResult>("/skills/test", {
+    method: "POST",
+    body: JSON.stringify({ skill, sample_goals: sampleGoals }),
+  });
+}
+
+export async function reloadSkills(): Promise<{ loaded: number; added: string[]; removed: string[] }> {
+  return request("/skills/reload", { method: "POST" });
+}
+
+export async function matchSkills(goal: string): Promise<SkillMatchResult[]> {
+  return request<SkillMatchResult[]>(`/skills/match?goal=${encodeURIComponent(goal)}`);
+}
+
+export async function getSkillTemplate(name = "my-skill"): Promise<{ yaml: string }> {
+  return request<{ yaml: string }>(`/skills/template?name=${encodeURIComponent(name)}`);
+}
+
+// ── Project Context ─────────────────────────────────────────────────────
+
+export interface ProjectSection {
+  section: string;
+  content: string;
+  updated_at?: string;
+}
+
+export interface DriftReport {
+  score: number;
+  healthy: boolean;
+  issues: { severity: string; code: string; message: string; section?: string }[];
+  checked_at: string;
+}
+
+export async function getProjectSections(): Promise<ProjectSection[]> {
+  return request<ProjectSection[]>("/project/sections");
+}
+
+export async function getProjectDrift(): Promise<DriftReport> {
+  return request<DriftReport>("/project/drift");
+}
+
+export async function updateProjectSection(section: string, content: string): Promise<void> {
+  await request("/project/sections", {
+    method: "POST",
+    body: JSON.stringify({ section, content }),
+  });
+}
+
+// ── Health ───────────────────────────────────────────────────────────────
+
+export async function checkHealth(): Promise<{ status: string }> {
+  return request<{ status: string }>("");
+}
+
 // ── SSE stream ───────────────────────────────────────────────────────────
 
 export function subscribeToTask(
