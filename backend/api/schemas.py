@@ -12,6 +12,7 @@ class TaskCreate(BaseModel):
     config: dict | None = None
     model_preference: str | None = None
     budget_limit: float | None = Field(None, ge=0)
+    routing_mode: str | None = Field(None, pattern=r"^(orchestrator|hermes_first|auto)$")
 
 
 class TaskResponse(BaseModel):

@@ -42,9 +42,27 @@ async def execute_task(ctx: dict, task_id: str, goal: str, config: dict | None) 
         task.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
+    # ── Phase 2: Hermes-first routing decision ──
+    from agents.hermes_router import should_route_hermes_first
+
+    use_hermes_first = should_route_hermes_first(goal, config)
+    routing_mode = "hermes_first" if use_hermes_first else "orchestrator"
+    logger.info("Task %s routing_mode=%s", task_id, routing_mode)
+
+    # Persist routing decision for observability
+    async with async_session() as db:
+        task = await db.get(Task, task_id)
+        if task:
+            task.routing_mode = routing_mode
+            await db.commit()
+
     total_cost = 0.0
     try:
-        final_output = await run_task(task_id, goal, config)
+        if use_hermes_first:
+            from agents.orchestrator import run_hermes_first
+            final_output = await run_hermes_first(task_id, goal, config)
+        else:
+            final_output = await run_task(task_id, goal, config)
         status = "completed"
         # run_task may return a dict with cost info or a string
         if isinstance(final_output, dict):

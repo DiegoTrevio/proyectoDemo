@@ -41,6 +41,7 @@ class Task(Base):
     artifacts: Mapped[list | None] = mapped_column(JSONB)
     estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
     budget_limit: Mapped[float | None] = mapped_column(Float)
+    routing_mode: Mapped[str | None] = mapped_column(String(32))  # "orchestrator" or "hermes_first"
     user_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("tenants.id", ondelete="SET NULL"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

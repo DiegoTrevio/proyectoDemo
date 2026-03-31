@@ -538,6 +538,88 @@ def get_orchestrator():
     return _compiled_graph
 
 
+async def run_hermes_first(task_id: str, goal: str, config: dict | None = None) -> str:
+    """Run a task directly via Hermes, bypassing the LangGraph orchestrator.
+
+    Phase 2: For qualifying tasks, this saves 3+ LLM calls (classify, plan, reflect)
+    and reduces latency by 5-15 seconds. Falls back to run_task() on failure.
+
+    Args:
+        task_id: Unique task identifier.
+        goal: The user's goal string.
+        config: Optional task configuration overrides.
+
+    Returns:
+        The final output string.
+    """
+    from agents.hermes import HermesAgent
+    from agents.hermes_router import select_toolsets_for_goal
+
+    await _publish(task_id, "thought", "Hermes-first mode: bypassing orchestration pipeline")
+
+    # ── Gather memory context (same as run_task) ──
+    memory_context = {}
+    try:
+        from memory.manager import gather_context
+        memory_context = await gather_context(
+            goal=goal,
+            user_id=config.get("user_id", "default") if config else "default",
+            task_id=task_id,
+        )
+        if memory_context.get("combined"):
+            await _publish(task_id, "thought",
+                           f"Retrieved memory context ({len(memory_context.get('mem0_memories', []))} memories)")
+    except Exception as e:
+        logger.warning("Memory context retrieval failed in hermes-first: %s", e)
+
+    # ── Check Hermes availability ──
+    agent = HermesAgent()
+    if not await agent.is_available():
+        logger.warning("Hermes unavailable in hermes-first mode, falling back to orchestrator")
+        await _publish(task_id, "thought", "Hermes unavailable — falling back to full orchestrator")
+        return await run_task(task_id, goal, config)
+
+    # ── Select toolsets and execute ──
+    toolsets = select_toolsets_for_goal(goal)
+    await _publish(task_id, "action", f"Executing directly via Hermes (toolsets={toolsets})", agent="hermes")
+
+    try:
+        result = await agent.execute(
+            task={"goal": goal, "task_id": task_id, "step_index": 0},
+            context={"memory": memory_context, "prior_results": []},
+        )
+    except Exception as e:
+        logger.exception("Hermes-first execution failed for task %s", task_id)
+        await _publish(task_id, "thought", f"Hermes-first exception: {e} — falling back to orchestrator")
+        return await run_task(task_id, goal, config)
+
+    # ── Handle failure → fallback ──
+    if not result.success or not result.output.strip():
+        error_msg = result.error or "Empty output"
+        logger.warning("Hermes-first failed for task %s: %s — falling back", task_id, error_msg)
+        await _publish(task_id, "thought", f"Hermes-first failed: {error_msg} — falling back to orchestrator")
+        return await run_task(task_id, goal, config)
+
+    # ── Success path ──
+    final_output = result.output
+    await _publish(task_id, "result", final_output, agent="hermes")
+    await _publish(task_id, "action", f"Task completed via Hermes-first (cost=${result.cost:.4f})")
+
+    # ── Save learnings to memory ──
+    try:
+        from memory.manager import save_learnings
+        await save_learnings(
+            goal=goal,
+            result=final_output,
+            task_id=task_id,
+            user_id=config.get("user_id", "default") if config else "default",
+        )
+    except Exception as e:
+        logger.warning("Memory save failed in hermes-first: %s", e)
+
+    return final_output
+
+
 async def run_task(task_id: str, goal: str, config: dict | None = None) -> str:
     """Run the full orchestrator pipeline for a task.
 

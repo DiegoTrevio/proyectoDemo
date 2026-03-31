@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     hermes_mcp_enabled: bool = True  # v0.6.0 MCP server mode
     hermes_fallback_providers: str = ""  # v0.6.0 ordered fallback: "anthropic,openrouter,openai"
     hermes_skills_dir: str = "/root/.hermes/skills"  # External skills directory
+    hermes_first_enabled: bool = False  # Phase 2: route qualifying tasks directly to Hermes
 
     # Memory — Supermemory (primary L1) + Mem0 (fallback)
     supermemory_api_key: str = ""

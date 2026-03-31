@@ -79,12 +79,17 @@ async def create_task(
 
     estimated_cost = _estimate_cost(body.goal, model)
 
+    # Phase 2: Pass routing_mode through config for the worker
+    task_config = body.config or {}
+    if body.routing_mode:
+        task_config["routing_mode"] = body.routing_mode
+
     task = Task(
         id=uuid.uuid4().hex,
         goal=body.goal,
         status="queued",
         model=model,
-        config=body.config,
+        config=task_config if task_config else None,
         estimated_cost=estimated_cost,
         budget_limit=body.budget_limit,
         user_id=user.tenant_id,
@@ -122,7 +127,7 @@ async def create_task(
 
 async def _run_orchestrator_fallback(task_id: str, goal: str, config: dict | None):
     """Fallback for dev mode when arq worker is not running."""
-    from agents.orchestrator import run_task
+    from agents.hermes_router import should_route_hermes_first
 
     async with async_session() as db:
         task = await db.get(Task, task_id)
@@ -132,7 +137,12 @@ async def _run_orchestrator_fallback(task_id: str, goal: str, config: dict | Non
             await db.commit()
 
     try:
-        final_output = await run_task(task_id, goal, config)
+        if should_route_hermes_first(goal, config):
+            from agents.orchestrator import run_hermes_first
+            final_output = await run_hermes_first(task_id, goal, config)
+        else:
+            from agents.orchestrator import run_task
+            final_output = await run_task(task_id, goal, config)
         status = "completed"
         result = {"output": final_output}
     except Exception as e:
