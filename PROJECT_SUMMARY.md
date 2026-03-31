@@ -48,6 +48,7 @@ AgentOS es una plataforma autónoma de agentes de IA con seguridad enterprise-gr
 | **supertokens** | supertokens-postgresql | 3567 | Autenticación |
 | **deerflow-langgraph** | ghcr.io/bytedance/deer-flow | 2024 | Runtime de agentes (LangGraph) |
 | **deerflow-gateway** | ghcr.io/bytedance/deer-flow-gateway | 8001 | Gateway API (skills, files) |
+| **hermes** | nousresearch/hermes-agent:v0.5.0 | — | Hermes Agent (Nous Research) — 40+ tools, multi-plataforma, Paperclip bridge para task management |
 
 Variantes adicionales:
 - `docker-compose.prod.yml`: JSON logging, resource limits, restart policies
@@ -70,7 +71,7 @@ El orquestador (`backend/agents/orchestrator.py`) coordina todos los agentes usa
 | **Browser** | `agents/browser.py` | Navegación web con Steel sessions + browser-use |
 | **Document** | `agents/document.py` | Generación de archivos (PPTX, DOCX, PDF, XLSX), imágenes con Gemini, parsing con Docling |
 | **DeerFlow** | `agents/deerflow.py` | SuperAgent enterprise (ByteDance), ejecución via LangGraph Server |
-| **Hermes** | `agents/hermes.py` | Nous Research, 30+ tools nativos, 80+ skills, wraps CLI binario |
+| **Hermes** | `agents/hermes.py` | Nous Research Hermes Agent v0.5.0 — 40+ tools, MCP client, plugin hooks, Paperclip bridge para task management, wraps CLI binario |
 
 Componentes auxiliares:
 - `agents/dispatcher.py` — Despacha tareas al agente correcto
@@ -277,6 +278,7 @@ Jobs:
 | **Observability** | langfuse 2.57 |
 | **MCP** | fastmcp 2.3 |
 | **LLM (Google)** | google-genai 1.7 |
+| **Agentes externos** | Hermes Agent v0.5.0 (Nous Research) — 40+ tools, MCP client, plugin architecture, Paperclip bridge (hermes-paperclip-adapter) |
 | **Missing** | ⚠️ `supermemory` NO está en requirements.txt |
 
 ---
