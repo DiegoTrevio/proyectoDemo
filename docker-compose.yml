@@ -283,9 +283,9 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # ─── Hermes Agent (Nous Research v0.4.0) ───────────────────────────
+  # ─── Hermes Agent (Nous Research v0.6.0) — REQUIRED SERVICE ─────────
   hermes:
-    image: ghcr.io/nousresearch/hermes-agent:latest
+    image: ghcr.io/nousresearch/hermes-agent:v0.6.0
     ports:
       - "3002:3000"
     env_file: .env
@@ -294,6 +294,15 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - EXA_API_KEY=${EXA_API_KEY:-}
+      - HERMES_PROFILE=${HERMES_PROFILE:-agentos}
+    volumes:
+      - hermes-data:/root/.hermes
+      - hermes-profiles:/root/.hermes/profiles
+      - ./backend/config/hermes_skills:/root/.hermes/skills:ro
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - agentOS-network
     healthcheck:
@@ -310,8 +319,6 @@ services:
         reservations:
           memory: 512M
     restart: unless-stopped
-    profiles:
-      - with-hermes
 
   # ─── DeerFlow 2.0 — LangGraph Server (Agent Runtime) ───────────────
   deerflow-langgraph:
@@ -386,6 +393,8 @@ volumes:
   neo4j-logs:
   deerflow-data:
   deerflow-workspace:
+  hermes-data:
+  hermes-profiles:
 
 networks:
   agentOS-network:

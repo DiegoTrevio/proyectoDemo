@@ -1,4 +1,4 @@
-"""Tests for Hermes Agent integration — client (HTTP + CLI), Paperclip bridge, and dispatcher."""
+"""Tests for Hermes Agent v0.6.0 — client (HTTP + CLI + profiles + MCP), Paperclip bridge, and dispatcher."""
 
 import os
 
@@ -18,7 +18,7 @@ class TestHermesOutputParsing:
     """Test regex patterns and _parse_output logic."""
 
     def _client(self) -> HermesClient:
-        return HermesClient(cli_path="hermes", model="test/model", timeout=60)
+        return HermesClient(cli_path="hermes", model="test/model", timeout=60, api_url="")
 
     def test_parse_session_id(self):
         assert _SESSION_ID_RE.search("session_id: abc-123").group(1) == "abc-123"
@@ -90,7 +90,7 @@ class TestHermesOutputParsing:
 
 
 class TestHermesHTTPMode:
-    """Test HTTP API mode (v0.4.0+)."""
+    """Test HTTP API mode (v0.6.0)."""
 
     def test_use_http_when_api_url_set(self):
         client = HermesClient(cli_path="hermes", model="test/model", timeout=60, api_url="http://hermes:3000")
@@ -137,6 +137,92 @@ class TestHermesHTTPMode:
         assert result.session_id == "chatcmpl-xyz"  # Falls back to response id
 
 
+# ─── HermesClient v0.6.0 features ──────────────────────────────────────────
+
+
+class TestHermesV060Features:
+    """Test v0.6.0-specific features: profiles, MCP, fallback providers."""
+
+    def test_default_profile(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="http://hermes:3000", profile="agentos",
+        )
+        assert client.profile == "agentos"
+
+    def test_fallback_providers_parsing(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="http://hermes:3000",
+            fallback_providers=["anthropic", "openrouter", "openai"],
+        )
+        assert client.fallback_providers == ["anthropic", "openrouter", "openai"]
+
+    def test_build_args_with_profile(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="", profile="my-project",
+        )
+        args = client._build_args("Do something", profile="my-project")
+        assert "--profile" in args
+        assert "my-project" in args
+
+    def test_build_args_without_profile(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="", profile="",
+        )
+        args = client._build_args("Do something", profile=None)
+        assert "--profile" not in args
+
+    def test_mcp_enabled_flag(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="http://hermes:3000", mcp_enabled=True,
+        )
+        assert client.mcp_enabled is True
+
+    def test_mcp_disabled_flag(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="http://hermes:3000", mcp_enabled=False,
+        )
+        assert client.mcp_enabled is False
+
+    @pytest.mark.asyncio
+    async def test_mcp_list_tools_returns_empty_when_disabled(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="http://hermes:3000", mcp_enabled=False,
+        )
+        result = await client.mcp_list_tools()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_mcp_call_tool_returns_error_when_disabled(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="http://hermes:3000", mcp_enabled=False,
+        )
+        result = await client.mcp_call_tool("terminal", {"command": "ls"})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_list_profiles_returns_empty_without_http(self):
+        client = HermesClient(
+            cli_path="hermes", model="test/model", timeout=60,
+            api_url="",
+        )
+        result = await client.list_profiles()
+        assert result == []
+
+    def test_hermes_result_includes_profile(self):
+        result = HermesResult(
+            success=True, output="test", mode="http", profile="agentos",
+        )
+        assert result.profile == "agentos"
+
+
 # ─── HermesClient CLI interaction ────────────────────────────────────────────
 
 
@@ -144,7 +230,7 @@ class TestHermesClientCLI:
     """Test CLI argument building and subprocess management."""
 
     def test_build_args_basic(self):
-        client = HermesClient(cli_path="hermes", model="anthropic/claude-sonnet-4", timeout=300)
+        client = HermesClient(cli_path="hermes", model="anthropic/claude-sonnet-4", timeout=300, api_url="")
         args = client._build_args("Do something")
 
         assert args[0] == "hermes"
@@ -156,20 +242,20 @@ class TestHermesClientCLI:
         assert "anthropic/claude-sonnet-4" in args
 
     def test_build_args_with_session_resume(self):
-        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, persist_session=True)
+        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, persist_session=True, api_url="")
         args = client._build_args("task", session_id="sess-001")
         assert "--resume" in args
         assert "sess-001" in args
 
     def test_build_args_no_resume_when_disabled(self):
-        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, persist_session=False)
+        client = HermesClient(cli_path="hermes", model="test/model", timeout=60, persist_session=False, api_url="")
         args = client._build_args("task", session_id="sess-001")
         assert "--resume" not in args
 
     def test_build_args_with_toolsets(self):
         client = HermesClient(
             cli_path="hermes", model="test/model", timeout=60,
-            enabled_toolsets=["terminal", "web"],
+            enabled_toolsets=["terminal", "web"], api_url="",
         )
         args = client._build_args("task")
         assert args.count("--tools") == 2
@@ -178,12 +264,12 @@ class TestHermesClientCLI:
 
     @pytest.mark.asyncio
     async def test_is_available_returns_false_when_not_installed(self):
-        client = HermesClient(cli_path="nonexistent-hermes-binary", model="test/model", timeout=10)
+        client = HermesClient(cli_path="nonexistent-hermes-binary", model="test/model", timeout=10, api_url="")
         assert await client.is_available() is False
 
     @pytest.mark.asyncio
     async def test_run_returns_error_when_cli_not_found(self):
-        client = HermesClient(cli_path="nonexistent-hermes-binary", model="test/model", timeout=10)
+        client = HermesClient(cli_path="nonexistent-hermes-binary", model="test/model", timeout=10, api_url="")
         result = await client.run("test prompt")
         assert result.success is False
         assert any("not found" in e.lower() for e in result.errors)
@@ -215,6 +301,7 @@ class TestHermesAgent:
         mock_client = MagicMock()
         mock_client.is_available = AsyncMock(return_value=True)
         mock_client._use_http = False
+        mock_client.profile = "agentos"
         mock_client.run = AsyncMock(return_value=HermesResult(
             success=True,
             output="Task completed successfully",
@@ -222,6 +309,7 @@ class TestHermesAgent:
             input_tokens=100,
             output_tokens=50,
             cost=0.005,
+            profile="agentos",
         ))
 
         agent = HermesAgent(client=mock_client)
@@ -237,12 +325,34 @@ class TestHermesAgent:
         mock_client.run.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_execute_with_profile_override(self):
+        from agents.hermes import HermesAgent
+
+        mock_client = MagicMock()
+        mock_client.is_available = AsyncMock(return_value=True)
+        mock_client._use_http = True
+        mock_client.profile = "agentos"
+        mock_client.run = AsyncMock(return_value=HermesResult(
+            success=True, output="Done", profile="custom-project",
+        ))
+
+        agent = HermesAgent(client=mock_client)
+        await agent.execute(
+            {"goal": "Do task", "task_id": "t-003", "profile": "custom-project"},
+            {"prior_results": [], "memory": {}},
+        )
+
+        call_kwargs = mock_client.run.call_args
+        assert call_kwargs.kwargs.get("profile") == "custom-project"
+
+    @pytest.mark.asyncio
     async def test_execute_with_context(self):
         from agents.hermes import HermesAgent
 
         mock_client = MagicMock()
         mock_client.is_available = AsyncMock(return_value=True)
         mock_client._use_http = False
+        mock_client.profile = "agentos"
         mock_client.run = AsyncMock(return_value=HermesResult(
             success=True, output="Done",
         ))
@@ -260,6 +370,28 @@ class TestHermesAgent:
 
         call_kwargs = mock_client.run.call_args
         assert "Remember this context" in call_kwargs.kwargs.get("context", "")
+
+    @pytest.mark.asyncio
+    async def test_get_status(self):
+        from agents.hermes import HermesAgent
+
+        mock_client = MagicMock()
+        mock_client.is_available = AsyncMock(return_value=True)
+        mock_client._use_http = True
+        mock_client.profile = "agentos"
+        mock_client.mcp_enabled = True
+        mock_client.fallback_providers = ["anthropic", "openrouter"]
+        mock_client.get_profile_info = AsyncMock(return_value={"name": "agentos", "skills": 8})
+        mock_client.mcp_list_tools = AsyncMock(return_value=[{"name": "terminal"}, {"name": "web"}])
+
+        agent = HermesAgent(client=mock_client)
+        status = await agent.get_status()
+
+        assert status["available"] is True
+        assert status["profile"] == "agentos"
+        assert status["mcp_enabled"] is True
+        assert status["mcp_tools_count"] == 2
+        assert status["fallback_providers"] == ["anthropic", "openrouter"]
 
 
 # ─── Paperclip adapter bridge ───────────────────────────────────────────────
@@ -309,6 +441,26 @@ class TestPaperclipBridge:
         call_kwargs = mock_client.run.call_args
         assert "Research AI safety" in call_kwargs.kwargs.get("prompt", call_kwargs.args[0] if call_kwargs.args else "")
 
+    @pytest.mark.asyncio
+    async def test_assign_task_with_profile(self):
+        from tools.hermes_paperclip import PaperclipBridge
+
+        mock_client = MagicMock()
+        mock_client.run = AsyncMock(return_value=HermesResult(
+            success=True, output="Done", profile="custom",
+        ))
+
+        bridge = PaperclipBridge(client=mock_client)
+        await bridge.assign_task(
+            task_id="t-002",
+            title="Code review",
+            body="Review the PR.",
+            profile="custom",
+        )
+
+        call_kwargs = mock_client.run.call_args
+        assert call_kwargs.kwargs.get("profile") == "custom"
+
 
 # ─── Dispatcher registration ────────────────────────────────────────────────
 
@@ -317,12 +469,11 @@ class TestDispatcherRegistration:
     """Test that Hermes integrates with the agent dispatcher."""
 
     def test_hermes_not_registered_when_disabled(self):
-        with patch.dict(os.environ, {"HERMES_ENABLED": "false"}):
-            # Force re-import to pick up new settings
-            from agents.dispatcher import get_available_agents
-            agents = get_available_agents()
-            # Hermes should not be in registry when disabled (default)
-            assert "hermes" not in agents
+        # The dispatcher imports settings locally, so patch at the source
+        from agents.dispatcher import _build_registry
+        with patch("config.settings.settings.hermes_enabled", False):
+            registry = _build_registry()
+            assert "hermes" not in registry
 
     def test_hermes_agent_has_correct_attributes(self):
         from agents.hermes import HermesAgent

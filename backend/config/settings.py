@@ -29,13 +29,17 @@ class Settings(BaseSettings):
     deerflow_langgraph_url: str = "http://deerflow-langgraph:2024"
     deerflow_enabled: bool = True
 
-    # Hermes Agent (Nous Research) — v0.4.0+
-    hermes_enabled: bool = False
-    hermes_api_url: str = ""  # HTTP API mode (preferred): e.g. http://hermes:3000
+    # Hermes Agent (Nous Research) — v0.6.0 (required service)
+    hermes_enabled: bool = True
+    hermes_api_url: str = "http://hermes:3000"  # HTTP API mode (required)
     hermes_cli_path: str = "hermes"  # CLI fallback when api_url is empty
     hermes_model: str = "anthropic/claude-sonnet-4"
     hermes_timeout: int = 300
     hermes_paperclip_enabled: bool = False  # Enable Paperclip adapter bridge
+    hermes_profile: str = "agentos"  # v0.6.0 multi-instance profile name
+    hermes_mcp_enabled: bool = True  # v0.6.0 MCP server mode
+    hermes_fallback_providers: str = ""  # v0.6.0 ordered fallback: "anthropic,openrouter,openai"
+    hermes_skills_dir: str = "/root/.hermes/skills"  # External skills directory
 
     # Memory — Supermemory (primary L1) + Mem0 (fallback)
     supermemory_api_key: str = ""

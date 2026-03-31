@@ -1,11 +1,13 @@
-"""Hermes Agent — delegates tasks to Nous Research's Hermes Agent (v0.4.0+).
+"""Hermes Agent — delegates tasks to Nous Research's Hermes Agent (v0.6.0).
 
-Hermes excels at:
-  - Complex multi-tool tasks (30+ native tools: terminal, files, web, git, browser, vision)
-  - Tasks requiring persistent memory across sessions
-  - Specialized skills (80+ loadable skills, including OCR, Huggingface, OSINT)
-  - Multi-step autonomous execution with session resumption
+Hermes v0.6.0 is a REQUIRED SERVICE in AgentOS, providing:
+  - 40+ native tools (terminal, files, web, git, browser, vision, code execution)
+  - Multi-instance profiles (isolated config, memory, sessions, skills per project)
+  - MCP server mode for IDE integration (Claude Desktop, VS Code, Cursor)
+  - Ordered fallback provider chains for automatic LLM failover
+  - Plugin lifecycle hooks and external skill directories
   - OpenAI-compatible API server for structured HTTP communication
+  - Paperclip bridge for task management integration
 
 The Hermes agent acts as a bridge: it receives tasks from AgentOS's orchestrator
 and delegates them to Hermes via HTTP API (preferred) or CLI subprocess (fallback).
@@ -34,11 +36,12 @@ _TOOLSET_MAP = {
 
 
 class HermesAgent(AbstractAgent):
-    """Bridges AgentOS orchestrator to Hermes Agent (HTTP API or CLI).
+    """Bridges AgentOS orchestrator to Hermes Agent v0.6.0 (HTTP API or CLI).
 
-    Supports two modes (auto-detected):
-      1. HTTP API (v0.4.0+) — calls /v1/chat/completions endpoint
-      2. CLI subprocess — spawns `hermes chat -q <prompt>`
+    v0.6.0 features:
+      - Profile isolation: each task can run in a separate profile
+      - MCP tool access: list and invoke Hermes tools via MCP protocol
+      - Fallback providers: automatic LLM failover chain
     """
 
     name = "hermes"
@@ -83,11 +86,39 @@ class HermesAgent(AbstractAgent):
         except Exception:
             return False
 
+    async def get_status(self) -> dict:
+        """Get detailed Hermes status including profile and MCP info (v0.6.0+)."""
+        available = await self.is_available()
+        status = {
+            "available": available,
+            "mode": "http" if self.client._use_http else "cli",
+            "profile": self.client.profile,
+            "mcp_enabled": self.client.mcp_enabled,
+            "fallback_providers": self.client.fallback_providers,
+            "paperclip_enabled": self.use_paperclip,
+        }
+        if available:
+            profile_info = await self.client.get_profile_info()
+            if profile_info:
+                status["profile_info"] = profile_info
+            if self.client.mcp_enabled:
+                mcp_tools = await self.client.mcp_list_tools()
+                status["mcp_tools_count"] = len(mcp_tools)
+        return status
+
+    async def list_mcp_tools(self) -> list[dict]:
+        """List tools available via Hermes MCP server (v0.6.0+)."""
+        return await self.client.mcp_list_tools()
+
+    async def call_mcp_tool(self, tool_name: str, arguments: dict) -> dict:
+        """Call a Hermes MCP tool directly (v0.6.0+)."""
+        return await self.client.mcp_call_tool(tool_name, arguments)
+
     async def execute(self, task: dict, context: dict) -> AgentResult:
         """Execute a task via Hermes Agent.
 
         Args:
-            task: Dict with {goal, task_id, step_index, task_type?}
+            task: Dict with {goal, task_id, step_index, task_type?, profile?}
             context: Dict with {memory, prior_results}
 
         Returns:
@@ -96,6 +127,7 @@ class HermesAgent(AbstractAgent):
         goal = task.get("goal", "")
         task_id = task.get("task_id", "unknown")
         task_type = task.get("task_type", "")
+        task_profile = task.get("profile")  # v0.6.0: per-task profile override
 
         # Check availability
         available = await self.is_available()
@@ -106,7 +138,7 @@ class HermesAgent(AbstractAgent):
                 output="",
                 error=(
                     "Hermes Agent is not available. "
-                    "Set HERMES_API_URL for HTTP mode or install CLI: pip install hermes-agent"
+                    "Hermes is a required service — check that the hermes container is running."
                 ),
             )
 
@@ -129,8 +161,8 @@ class HermesAgent(AbstractAgent):
 
         mode = "paperclip" if self.use_paperclip else ("http" if self.client._use_http else "cli")
         logger.info(
-            "Hermes executing: task_id=%s type=%s mode=%s goal=%s",
-            task_id, task_type or "auto", mode, goal[:80],
+            "Hermes executing: task_id=%s type=%s mode=%s profile=%s goal=%s",
+            task_id, task_type or "auto", mode, task_profile or self.client.profile, goal[:80],
         )
 
         # Execute via Paperclip adapter or direct Hermes
@@ -140,18 +172,21 @@ class HermesAgent(AbstractAgent):
                 title=goal[:120],
                 body=f"{context_str}\n\n{goal}" if context_str else goal,
                 toolsets=toolsets,
+                profile=task_profile,
             )
         else:
             result = await self.client.run(
                 prompt=goal,
                 context=context_str,
                 toolsets=toolsets,
+                profile=task_profile,
             )
 
         if result.success:
             logger.info(
-                "Hermes completed: task_id=%s mode=%s tokens=%d+%d cost=$%.4f",
-                task_id, result.mode, result.input_tokens, result.output_tokens, result.cost,
+                "Hermes completed: task_id=%s mode=%s profile=%s tokens=%d+%d cost=$%.4f",
+                task_id, result.mode, result.profile or "default",
+                result.input_tokens, result.output_tokens, result.cost,
             )
         else:
             error_summary = "; ".join(result.errors) if result.errors else "Unknown error"

@@ -1,10 +1,13 @@
-"""Hermes Paperclip Adapter bridge — task management integration.
+"""Hermes Paperclip Adapter bridge — task management integration (v0.6.0).
 
 Bridges AgentOS task dispatch to Hermes via the Paperclip adapter protocol
 (github.com/NousResearch/hermes-paperclip-adapter).
 
 The Paperclip adapter enables Hermes to operate as an autonomous agent
 with structured task assignment, session persistence, and progress reporting.
+
+v0.6.0 additions:
+  - Profile-aware task assignment (isolated execution per profile)
 
 This module provides:
   - PaperclipBridge: sends tasks using the Paperclip adapter format
@@ -114,6 +117,7 @@ class PaperclipBridge:
         run_id: str | None = None,
         session_id: str | None = None,
         toolsets: list[str] | None = None,
+        profile: str | None = None,
     ) -> HermesResult:
         """Assign a task to Hermes using the Paperclip adapter protocol.
 
@@ -125,6 +129,7 @@ class PaperclipBridge:
             run_id: Optional run identifier for tracking.
             session_id: Optional session to resume.
             toolsets: Optional toolset override.
+            profile: Optional Hermes profile for isolated execution (v0.6.0+).
 
         Returns:
             HermesResult from execution.
@@ -156,6 +161,7 @@ class PaperclipBridge:
             prompt=prompt,
             session_id=session_id,
             toolsets=toolsets or self.config.enabled_toolsets,
+            profile=profile,
         )
 
     def _default_prompt(self, title: str, body: str, project_name: str) -> str:

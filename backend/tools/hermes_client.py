@@ -1,15 +1,17 @@
-"""Hermes Agent client — supports both HTTP API (v0.4.0+) and CLI subprocess modes.
+"""Hermes Agent client — supports HTTP API (v0.6.0), MCP server, and CLI modes.
 
-Hermes Agent (by Nous Research) provides:
-  - 30+ native tools (terminal, file ops, web, git, browser, vision)
-  - 80+ loadable skills
-  - Persistent memory across sessions
-  - Multi-provider LLM support (Anthropic, OpenAI, OpenRouter, Google)
-  - OpenAI-compatible API server (/v1/chat/completions) — new in v0.4.0
+Hermes Agent v0.6.0 (by Nous Research) provides:
+  - 40+ native tools (terminal, file ops, web, git, browser, vision)
+  - Multi-instance profiles (isolated config, memory, sessions, skills)
+  - MCP server mode (hermes mcp serve) for Claude Desktop / VS Code / Cursor
+  - Ordered fallback provider chains (automatic LLM failover)
+  - Plugin lifecycle hooks and external skill directories
+  - OpenAI-compatible API server (/v1/chat/completions)
 
-This client supports two execution modes:
+This client supports three execution modes:
   1. HTTP API (preferred) — calls Hermes's OpenAI-compatible API server
-  2. CLI subprocess (fallback) — spawns `hermes chat -q <prompt>`
+  2. MCP (v0.6.0+) — communicates via Model Context Protocol
+  3. CLI subprocess (fallback) — spawns `hermes chat -q <prompt>`
 
 Ported from the TypeScript adapter: github.com/NousResearch/hermes-paperclip-adapter
 """
@@ -41,7 +43,7 @@ GRACE_PERIOD = 10  # seconds to wait after timeout before killing
 
 @dataclass
 class HermesResult:
-    """Result from a Hermes execution (HTTP or CLI)."""
+    """Result from a Hermes execution (HTTP, MCP, or CLI)."""
     success: bool
     output: str
     session_id: str | None = None
@@ -51,11 +53,12 @@ class HermesResult:
     exit_code: int | None = None
     errors: list[str] = field(default_factory=list)
     timed_out: bool = False
-    mode: str = "cli"  # "http" or "cli"
+    mode: str = "cli"  # "http", "mcp", or "cli"
+    profile: str | None = None  # v0.6.0 profile used
 
 
 class HermesClient:
-    """Async client for Hermes Agent — HTTP API (v0.4.0+) with CLI fallback.
+    """Async client for Hermes Agent v0.6.0 — HTTP API, MCP server, or CLI.
 
     Usage:
         client = HermesClient()
@@ -73,6 +76,9 @@ class HermesClient:
         persist_session: bool = True,
         enabled_toolsets: list[str] | None = None,
         api_url: str | None = None,
+        profile: str | None = None,
+        mcp_enabled: bool | None = None,
+        fallback_providers: list[str] | None = None,
     ):
         self.cli_path = cli_path or settings.hermes_cli_path
         self.model = model or settings.hermes_model
@@ -80,7 +86,17 @@ class HermesClient:
         self.max_iterations = max_iterations
         self.persist_session = persist_session
         self.enabled_toolsets = enabled_toolsets
-        self.api_url = api_url or getattr(settings, "hermes_api_url", "")
+        self.api_url = api_url if api_url is not None else settings.hermes_api_url
+        self.profile = profile or settings.hermes_profile
+        self.mcp_enabled = mcp_enabled if mcp_enabled is not None else settings.hermes_mcp_enabled
+        self.fallback_providers = fallback_providers or self._parse_fallback_providers()
+
+    def _parse_fallback_providers(self) -> list[str]:
+        """Parse comma-separated fallback providers from settings."""
+        raw = settings.hermes_fallback_providers
+        if not raw:
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
 
     @property
     def _use_http(self) -> bool:
@@ -100,7 +116,7 @@ class HermesClient:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(f"{self.api_url}/health")
                 if resp.status_code == 200:
-                    logger.debug("Hermes API server healthy at %s", self.api_url)
+                    logger.debug("Hermes API server healthy at %s (profile=%s)", self.api_url, self.profile)
                     return True
                 # Some versions use /v1/models as health indicator
                 resp = await client.get(f"{self.api_url}/v1/models")
@@ -129,6 +145,90 @@ class HermesClient:
             logger.debug("Hermes CLI version check failed: %s", e)
             return False
 
+    # ── Profile management (v0.6.0) ─────────────────────────────────────
+
+    async def list_profiles(self) -> list[dict]:
+        """List available Hermes profiles (v0.6.0+)."""
+        if not self._use_http:
+            return []
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{self.api_url}/v1/profiles")
+                if resp.status_code == 200:
+                    return resp.json().get("profiles", [])
+        except Exception as e:
+            logger.debug("Failed to list profiles: %s", e)
+        return []
+
+    async def switch_profile(self, profile_name: str) -> bool:
+        """Switch the active Hermes profile (v0.6.0+)."""
+        if not self._use_http:
+            return False
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{self.api_url}/v1/profiles/switch",
+                    json={"profile": profile_name},
+                )
+                if resp.status_code == 200:
+                    self.profile = profile_name
+                    logger.info("Switched Hermes profile to: %s", profile_name)
+                    return True
+        except Exception as e:
+            logger.debug("Failed to switch profile: %s", e)
+        return False
+
+    async def get_profile_info(self) -> dict:
+        """Get current profile configuration (v0.6.0+)."""
+        if not self._use_http:
+            return {}
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{self.api_url}/v1/profiles/current")
+                if resp.status_code == 200:
+                    return resp.json()
+        except Exception as e:
+            logger.debug("Failed to get profile info: %s", e)
+        return {}
+
+    # ── MCP server mode (v0.6.0) ────────────────────────────────────────
+
+    async def mcp_list_tools(self) -> list[dict]:
+        """List tools exposed via MCP server mode (v0.6.0+)."""
+        if not self._use_http or not self.mcp_enabled:
+            return []
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{self.api_url}/mcp/tools")
+                if resp.status_code == 200:
+                    return resp.json().get("tools", [])
+        except Exception as e:
+            logger.debug("Failed to list MCP tools: %s", e)
+        return []
+
+    async def mcp_call_tool(self, tool_name: str, arguments: dict) -> dict:
+        """Call a specific MCP-exposed tool (v0.6.0+)."""
+        if not self._use_http or not self.mcp_enabled:
+            return {"error": "MCP not available"}
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.api_url}/mcp/tools/call",
+                    json={"name": tool_name, "arguments": arguments},
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+                return {"error": f"MCP tool call failed: {resp.status_code}"}
+        except Exception as e:
+            return {"error": f"MCP tool call error: {e}"}
+
+    # ── Task execution ──────────────────────────────────────────────────
+
     async def run(
         self,
         prompt: str,
@@ -136,6 +236,7 @@ class HermesClient:
         extra_env: dict[str, str] | None = None,
         context: str = "",
         toolsets: list[str] | None = None,
+        profile: str | None = None,
     ) -> HermesResult:
         """Execute a task via Hermes (HTTP API or CLI fallback).
 
@@ -145,15 +246,16 @@ class HermesClient:
             extra_env: Additional environment variables (CLI mode only).
             context: Optional context to prepend to the prompt.
             toolsets: Optional toolsets to enable for this execution.
+            profile: Optional profile override for this execution (v0.6.0+).
 
         Returns:
             HermesResult with parsed output, tokens, cost, and session info.
         """
         if self._use_http:
-            return await self._run_http(prompt, session_id, context, toolsets)
-        return await self._run_cli(prompt, session_id, extra_env, context)
+            return await self._run_http(prompt, session_id, context, toolsets, profile)
+        return await self._run_cli(prompt, session_id, extra_env, context, profile)
 
-    # ── HTTP API mode (v0.4.0+) ────────────────────────────────────────────
+    # ── HTTP API mode ───────────────────────────────────────────────────
 
     async def _run_http(
         self,
@@ -161,6 +263,7 @@ class HermesClient:
         session_id: str | None = None,
         context: str = "",
         toolsets: list[str] | None = None,
+        profile: str | None = None,
     ) -> HermesResult:
         """Execute via Hermes's OpenAI-compatible API server."""
         import httpx
@@ -178,7 +281,7 @@ class HermesClient:
             "max_tokens": 8192,
         }
 
-        # Pass toolsets and session via extra_body (Hermes extension)
+        # Pass toolsets, session, profile, and fallback via extra_body (Hermes extension)
         extra: dict = {}
         if toolsets:
             extra["toolsets"] = toolsets
@@ -186,12 +289,19 @@ class HermesClient:
             extra["session_id"] = session_id
         if self.max_iterations:
             extra["max_iterations"] = self.max_iterations
+        # v0.6.0: profile isolation
+        active_profile = profile or self.profile
+        if active_profile:
+            extra["profile"] = active_profile
+        # v0.6.0: ordered fallback providers
+        if self.fallback_providers:
+            extra["fallback_providers"] = self.fallback_providers
         if extra:
             payload["extra_body"] = extra
 
         logger.info(
-            "Hermes HTTP executing: model=%s url=%s prompt=%s",
-            self.model, self.api_url, prompt[:80],
+            "Hermes HTTP executing: model=%s profile=%s url=%s prompt=%s",
+            self.model, active_profile, self.api_url, prompt[:80],
         )
 
         try:
@@ -210,10 +320,13 @@ class HermesClient:
                         output="",
                         errors=[f"Hermes API returned {resp.status_code}: {error_text[:500]}"],
                         mode="http",
+                        profile=active_profile,
                     )
 
                 data = resp.json()
-                return self._parse_http_response(data)
+                result = self._parse_http_response(data)
+                result.profile = active_profile
+                return result
 
         except httpx.TimeoutException:
             logger.warning("Hermes HTTP timed out after %ds", self.timeout)
@@ -223,6 +336,7 @@ class HermesClient:
                 errors=[f"Hermes API timed out after {self.timeout}s"],
                 timed_out=True,
                 mode="http",
+                profile=active_profile,
             )
         except Exception as e:
             logger.warning("Hermes HTTP request failed: %s", e)
@@ -231,6 +345,7 @@ class HermesClient:
                 output="",
                 errors=[f"Hermes API request failed: {e}"],
                 mode="http",
+                profile=active_profile,
             )
 
     def _parse_http_response(self, data: dict) -> HermesResult:
@@ -267,7 +382,7 @@ class HermesClient:
             mode="http",
         )
 
-    # ── CLI subprocess mode (legacy) ───────────────────────────────────────
+    # ── CLI subprocess mode (legacy) ───────────────────────────────────
 
     async def _run_cli(
         self,
@@ -275,15 +390,17 @@ class HermesClient:
         session_id: str | None = None,
         extra_env: dict[str, str] | None = None,
         context: str = "",
+        profile: str | None = None,
     ) -> HermesResult:
         """Execute a task via the Hermes CLI subprocess."""
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
-        args = self._build_args(full_prompt, session_id)
+        active_profile = profile or self.profile
+        args = self._build_args(full_prompt, session_id, active_profile)
         env = self._build_env(extra_env)
 
         logger.info(
-            "Hermes CLI executing: model=%s timeout=%ds prompt=%s",
-            self.model, self.timeout, prompt[:80],
+            "Hermes CLI executing: model=%s profile=%s timeout=%ds prompt=%s",
+            self.model, active_profile, self.timeout, prompt[:80],
         )
 
         timed_out = False
@@ -318,6 +435,7 @@ class HermesClient:
                 output="",
                 errors=[f"Hermes CLI not found: {self.cli_path}"],
                 mode="cli",
+                profile=active_profile,
             )
         except Exception as e:
             return HermesResult(
@@ -325,14 +443,19 @@ class HermesClient:
                 output="",
                 errors=[f"Failed to spawn Hermes: {e}"],
                 mode="cli",
+                profile=active_profile,
             )
 
         stdout = stdout_bytes.decode(errors="replace")
         stderr = stderr_bytes.decode(errors="replace")
 
-        return self._parse_output(stdout, stderr, proc.returncode, timed_out)
+        result = self._parse_output(stdout, stderr, proc.returncode, timed_out)
+        result.profile = active_profile
+        return result
 
-    def _build_args(self, prompt: str, session_id: str | None = None) -> list[str]:
+    def _build_args(
+        self, prompt: str, session_id: str | None = None, profile: str | None = None,
+    ) -> list[str]:
         """Build CLI arguments for a Hermes invocation."""
         args = [
             self.cli_path,
@@ -341,6 +464,10 @@ class HermesClient:
             "-Q",             # Quiet mode (no interactive UI)
             "-m", self.model,
         ]
+
+        # v0.6.0: profile isolation
+        if profile:
+            args.extend(["--profile", profile])
 
         if self.max_iterations:
             args.extend(["--max-iterations", str(self.max_iterations)])
